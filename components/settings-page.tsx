@@ -1,12 +1,11 @@
 "use client"
 
-import { useState } from "react"
+import React, { useState } from "react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Switch } from "@/components/ui/switch"
-import { Slider } from "@/components/ui/slider"
 import { Badge } from "@/components/ui/badge"
-import { Bell, Clock, Palette, Shield, Download, Trash2, User, Settings, ChevronRight } from "lucide-react"
+import { Bell, Palette, Shield, Download, Trash2, User, Settings, ChevronRight } from "lucide-react"
 import { ThemeToggle } from "@/components/theme-toggle"
 
 interface SettingsPageProps {
@@ -16,64 +15,28 @@ interface SettingsPageProps {
 export function SettingsPage({ onBack }: SettingsPageProps) {
   const [notifications, setNotifications] = useState(true)
   const [soundEnabled, setSoundEnabled] = useState(true)
-  const [vibrationEnabled, setVibrationEnabled] = useState(true)
-  const [focusTime, setFocusTime] = useState([25])
-  const [shortBreak, setShortBreak] = useState([5])
-  const [longBreak, setLongBreak] = useState([15])
-  const [autoStartBreaks, setAutoStartBreaks] = useState(false)
-  const [autoStartPomodoros, setAutoStartPomodoros] = useState(false)
+  const [vibrationEnabled, setVibrationEnabled] = useState(false)
+  const [displayName, setDisplayName] = useState("")
+
+  const isMobileDevice = () => {
+    if (typeof navigator === "undefined") return false
+    return /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent)
+  }
+
+  // Load persisted settings
+  React.useEffect(() => {
+    try {
+      const name = window.localStorage.getItem("username") || ""
+      setDisplayName(name)
+      const sound = window.localStorage.getItem("soundEnabled")
+      const vibr = window.localStorage.getItem("vibrationEnabled")
+      if (sound !== null) setSoundEnabled(sound === "true")
+      if (vibr !== null) setVibrationEnabled(vibr === "true")
+    } catch {}
+  }, [])
 
   const settingsSections = [
-    {
-      title: "Timer Settings",
-      icon: Clock,
-      items: [
-        {
-          label: "Focus Time",
-          description: `${focusTime[0]} minutes`,
-          type: "slider" as const,
-          value: focusTime,
-          onChange: setFocusTime,
-          min: 15,
-          max: 60,
-          step: 5,
-        },
-        {
-          label: "Short Break",
-          description: `${shortBreak[0]} minutes`,
-          type: "slider" as const,
-          value: shortBreak,
-          onChange: setShortBreak,
-          min: 3,
-          max: 15,
-          step: 1,
-        },
-        {
-          label: "Long Break",
-          description: `${longBreak[0]} minutes`,
-          type: "slider" as const,
-          value: longBreak,
-          onChange: setLongBreak,
-          min: 10,
-          max: 30,
-          step: 5,
-        },
-        {
-          label: "Auto-start Breaks",
-          description: "Automatically start break timers",
-          type: "switch" as const,
-          value: autoStartBreaks,
-          onChange: setAutoStartBreaks,
-        },
-        {
-          label: "Auto-start Pomodoros",
-          description: "Automatically start focus sessions",
-          type: "switch" as const,
-          value: autoStartPomodoros,
-          onChange: setAutoStartPomodoros,
-        },
-      ],
-    },
+    // Timer durations are now set when creating tasks
     {
       title: "Notifications",
       icon: Bell,
@@ -83,22 +46,32 @@ export function SettingsPage({ onBack }: SettingsPageProps) {
           description: "Get notified when timers complete",
           type: "switch" as const,
           value: notifications,
-          onChange: setNotifications,
+          onChange: (v: boolean) => {
+            setNotifications(v)
+          },
         },
         {
           label: "Sound Alerts",
           description: "Play sound when timer ends",
           type: "switch" as const,
           value: soundEnabled,
-          onChange: setSoundEnabled,
+          onChange: (v: boolean) => {
+            setSoundEnabled(v)
+            try { window.localStorage.setItem("soundEnabled", String(v)) } catch {}
+          },
         },
-        {
-          label: "Vibration",
-          description: "Vibrate device on timer completion",
-          type: "switch" as const,
-          value: vibrationEnabled,
-          onChange: setVibrationEnabled,
-        },
+        ...(isMobileDevice()
+          ? [{
+              label: "Vibration",
+              description: "Vibrate device on timer completion",
+              type: "switch" as const,
+              value: vibrationEnabled,
+              onChange: (v: boolean) => {
+                setVibrationEnabled(v)
+                try { window.localStorage.setItem("vibrationEnabled", String(v)) } catch {}
+              },
+            }]
+          : []),
       ],
     },
     {
@@ -109,6 +82,17 @@ export function SettingsPage({ onBack }: SettingsPageProps) {
           label: "Theme",
           description: "Switch between light and dark mode",
           type: "theme" as const,
+        },
+      ],
+    },
+    {
+      title: "Profile",
+      icon: User,
+      items: [
+        {
+          label: "Display Name",
+          description: "Shown on the Home screen",
+          type: "profile" as const,
         },
       ],
     },
@@ -147,24 +131,7 @@ export function SettingsPage({ onBack }: SettingsPageProps) {
         )
 
       case "slider":
-        return (
-          <div className="space-y-3">
-            <div className="flex items-center justify-between">
-              <div className="flex-1">
-                <p className="font-medium text-foreground">{item.label}</p>
-                <p className="text-sm text-muted-foreground">{item.description}</p>
-              </div>
-            </div>
-            <Slider
-              value={item.value}
-              onValueChange={item.onChange}
-              min={item.min}
-              max={item.max}
-              step={item.step}
-              className="w-full"
-            />
-          </div>
-        )
+        return null
 
       case "theme":
         return (
@@ -174,6 +141,37 @@ export function SettingsPage({ onBack }: SettingsPageProps) {
               <p className="text-sm text-muted-foreground">{item.description}</p>
             </div>
             <ThemeToggle />
+          </div>
+        )
+
+      case "profile":
+        return (
+          <div className="space-y-3">
+            <div className="flex items-center justify-between">
+              <div className="flex-1">
+                <p className="font-medium text-foreground">{item.label}</p>
+                <p className="text-sm text-muted-foreground">{item.description}</p>
+              </div>
+            </div>
+            <div className="space-y-2">
+              <input
+                className="border-input dark:bg-input/30 w-full rounded-md border bg-transparent px-3 py-2 text-sm outline-none"
+                placeholder="Enter your display name"
+                value={displayName}
+                onChange={(e) => setDisplayName(e.target.value)}
+              />
+              <div className="flex justify-end">
+                <Button
+                  onClick={() => {
+                    try {
+                      window.localStorage.setItem("username", displayName || "")
+                    } catch {}
+                  }}
+                >
+                  Save
+                </Button>
+              </div>
+            </div>
           </div>
         )
 

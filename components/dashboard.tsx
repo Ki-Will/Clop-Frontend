@@ -1,40 +1,202 @@
 "use client"
 
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
+import { Input } from "@/components/ui/input"
 import { Badge } from "@/components/ui/badge"
 import { Play, Pause, Plus, Bell, Calendar, CheckCircle2, Clock, Target, Home, Settings } from "lucide-react"
 import { ThemeToggle } from "@/components/theme-toggle"
 import { SettingsPage } from "@/components/settings-page"
+import { AuthFlow } from "./auth-flow"
 
 export function Dashboard() {
   const [activeTab, setActiveTab] = useState<"home" | "timer" | "tasks" | "calendar" | "notifications" | "settings">(
     "home",
   )
+  const [userName, setUserName] = useState("Alex")
   const [isTimerRunning, setIsTimerRunning] = useState(false)
-  const [timeLeft, setTimeLeft] = useState(25 * 60) // 25 minutes in seconds
+  const [focusMinutes, setFocusMinutes] = useState(25)
+  const [shortBreakMinutes] = useState(5)
+  const [longBreakMinutes] = useState(15)
+  const [mode, setMode] = useState<"focus" | "break">("focus")
+  const [completedFocusCount, setCompletedFocusCount] = useState(0)
+  const [timeLeft, setTimeLeft] = useState(25 * 60) // seconds
   const [currentTask, setCurrentTask] = useState("Design mobile app")
+  const [selectedTaskId, setSelectedTaskId] = useState<number | null>(null)
 
   const formatTime = (seconds: number) => {
     const mins = Math.floor(seconds / 60)
     const secs = seconds % 60
     return `${mins.toString().padStart(2, "0")}:${secs.toString().padStart(2, "0")}`
   }
+  const dailyProgress = 30
+  const [newTask, setNewtask] = useState(false)
+  const [newTaskTitle, setNewTaskTitle] = useState("")
+  const [newTaskCategory, setNewTaskCategory] = useState("")
+  const [newTaskDuration, setNewTaskDuration] = useState<number>(25)
+  
+  const [todaysTasks, setTodaysTasks] = useState(
+    [
+      { id: 1, title: "Design mobile app", category: "Design", completed: false, color: "bg-blue-500", durationMinutes: 25 },
+      { id: 2, title: "Review code changes", category: "Development", completed: true, color: "bg-green-500", durationMinutes: 30 },
+      { id: 3, title: "Team meeting", category: "Meeting", completed: false, color: "bg-purple-500", durationMinutes: 15 },
+      { id: 4, title: "Write documentation", category: "Writing", completed: false, color: "bg-orange-500", durationMinutes: 20 },
+    ]
+  )
 
-  const dailyProgress = 65
-  const todaysTasks = [
-    { id: 1, title: "Design mobile app", category: "Design", completed: false, color: "bg-blue-500" },
-    { id: 2, title: "Review code changes", category: "Development", completed: true, color: "bg-green-500" },
-    { id: 3, title: "Team meeting", category: "Meeting", completed: false, color: "bg-purple-500" },
-    { id: 4, title: "Write documentation", category: "Writing", completed: false, color: "bg-orange-500" },
-  ]
+  const addNewTask = () => {
+    const trimmedTitle = newTaskTitle.trim()
+    const trimmedCategory = newTaskCategory.trim()
+    if (!trimmedTitle) return
+    const nextId = (todaysTasks[todaysTasks.length - 1]?.id ?? 0) + 1
+    const task = {
+      id: nextId,
+      title: trimmedTitle,
+      category: trimmedCategory || "General",
+      completed: false,
+      color: "bg-blue-500",
+      durationMinutes: Math.max(1, Math.floor(Number(newTaskDuration) || 25)),
+    }
+    setTodaysTasks([...todaysTasks, task])
+    setNewTaskTitle("")
+    setNewTaskCategory("")
+    setNewTaskDuration(25)
+    setNewtask(false)
+  }
+
+  const toggleTaskCompleted = (id: number) => {
+    setTodaysTasks((prev) => prev.map((t) => (t.id === id ? { ...t, completed: !t.completed } : t)))
+  }
+
+  const selectTaskForFocus = (id: number) => {
+    const task = todaysTasks.find((t) => t.id === id)
+    if (!task) return
+    setSelectedTaskId(id)
+    setCurrentTask(task.title)
+    setMode("focus")
+    setIsTimerRunning(false)
+    setTimeLeft(task.durationMinutes * 60)
+    setActiveTab("timer")
+  }
+
+  const getFocusTotalSeconds = () => {
+    const task = selectedTaskId ? todaysTasks.find((t) => t.id === selectedTaskId) : null
+    return (task?.durationMinutes ?? focusMinutes) * 60
+  }
+
+  // Keep timeLeft in sync when durations change and timer is not running
+  useEffect(() => {
+    if (isTimerRunning) return
+    setTimeLeft((mode === "focus" ? getFocusTotalSeconds() / 1 : shortBreakMinutes * 60))
+  }, [focusMinutes, shortBreakMinutes, mode, isTimerRunning, selectedTaskId, todaysTasks])
+
+  // Load username from localStorage and react to storage updates
+  useEffect(() => {
+    const stored = typeof window !== "undefined" ? window.localStorage.getItem("username") : null
+    if (stored) setUserName(stored)
+    const onStorage = (e: StorageEvent) => {
+      if (e.key === "username" && e.newValue) setUserName(e.newValue)
+    }
+    window.addEventListener("storage", onStorage)
+    return () => window.removeEventListener("storage", onStorage)
+  }, [])
+
+  // Sound / vibration settings
+  const getSettings = () => {
+    if (typeof window === "undefined") return { sound: true, vibration: false }
+    const sound = window.localStorage.getItem("soundEnabled")
+    const vibration = window.localStorage.getItem("vibrationEnabled")
+    return {
+      sound: sound === null ? true : sound === "true",
+      vibration: vibration === "true",
+    }
+  }
+
+  const isMobileDevice = () => {
+    if (typeof navigator === "undefined") return false
+    return /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent)
+  }
+
+  const playBeep = () => {
+    try {
+      const AudioCtx = (window as any).AudioContext || (window as any).webkitAudioContext
+      if (!AudioCtx) return
+      const ctx = new AudioCtx()
+      const o = ctx.createOscillator()
+      const g = ctx.createGain()
+      o.type = "sine"
+      o.frequency.value = 880
+      o.connect(g)
+      g.connect(ctx.destination)
+      g.gain.value = 0.05
+      o.start()
+      setTimeout(() => {
+        o.stop()
+        ctx.close()
+      }, 400)
+    } catch {}
+  }
+
+  const notifyCompletion = () => {
+    const { sound, vibration } = getSettings()
+    if (sound) playBeep()
+    if (vibration && isMobileDevice() && typeof navigator !== "undefined" && (navigator as any).vibrate) {
+      ;(navigator as any).vibrate(200)
+    }
+    try {
+      if (typeof window !== "undefined" && "Notification" in window) {
+        if ((window as any).Notification.permission === "granted") {
+          new (window as any).Notification("FocusFlow", {
+            body: mode === "focus" ? "Focus session complete. Break time!" : "Break over. Back to focus.",
+          })
+        } else if ((window as any).Notification.permission !== "denied") {
+          ;(window as any).Notification.requestPermission()
+        }
+      }
+    } catch {}
+  }
+
+  const ensureNotificationPermission = () => {
+    try {
+      if (typeof window !== "undefined" && "Notification" in window) {
+        if ((window as any).Notification.permission === "default") {
+          ;(window as any).Notification.requestPermission()
+        }
+      }
+    } catch {}
+  }
+
+  // Timer countdown and automatic transitions between focus and break
+  useEffect(() => {
+    if (!isTimerRunning) return
+    if (timeLeft <= 0) {
+      if (mode === "focus") {
+        const nextCount = completedFocusCount + 1
+        setCompletedFocusCount(nextCount)
+        const isLong = nextCount % 4 === 0
+        setMode("break")
+        setTimeLeft((isLong ? longBreakMinutes : shortBreakMinutes) * 60)
+        notifyCompletion()
+      } else {
+        setMode("focus")
+        setTimeLeft(getFocusTotalSeconds())
+        notifyCompletion()
+      }
+      return
+    }
+    const intervalId = setInterval(() => {
+      setTimeLeft((prev) => (prev > 0 ? prev - 1 : 0))
+    }, 1000)
+    return () => clearInterval(intervalId)
+  }, [isTimerRunning, timeLeft, mode, completedFocusCount, shortBreakMinutes, longBreakMinutes, selectedTaskId, todaysTasks])
 
   const renderHomeScreen = () => (
     <div className="space-y-6 page-transition">
       {/* Greeting */}
       <div className="text-center space-y-2">
-        <h1 className="text-2xl font-bold text-foreground">Good morning, Alex!</h1>
+        <h1 className="text-2xl font-bold text-foreground">Good morning, {userName}</h1>
         <p className="text-muted-foreground">Ready to boost your productivity?</p>
       </div>
 
@@ -130,8 +292,10 @@ export function Dashboard() {
   const renderTimerScreen = () => (
     <div className="space-y-8 page-transition">
       <div className="text-center space-y-2">
-        <h1 className="text-2xl font-bold text-foreground">Focus Session</h1>
-        <p className="text-muted-foreground">{currentTask}</p>
+        <h1 className="text-2xl font-bold text-foreground">{mode === "focus" ? "Focus" : "Break"} Session</h1>
+        <p className="text-muted-foreground">
+          {mode === "focus" ? currentTask : "Time to recharge"}
+        </p>
       </div>
 
       {/* Circular Timer */}
@@ -155,24 +319,34 @@ export function Dashboard() {
               strokeWidth="4"
               fill="transparent"
               strokeDasharray={`${2 * Math.PI * 45}`}
-              strokeDashoffset={`${2 * Math.PI * 45 * (timeLeft / (25 * 60))}`}
+              strokeDashoffset={`${2 * Math.PI * 45 * (timeLeft / (mode === "focus" ? getFocusTotalSeconds() : (shortBreakMinutes * 60)))}`}
               className={`text-primary chart-animate ${isTimerRunning ? "timer-pulse" : ""}`}
               strokeLinecap="round"
             />
           </svg>
           <div className="absolute inset-0 flex flex-col items-center justify-center">
             <span className="text-4xl font-bold text-foreground">{formatTime(timeLeft)}</span>
-            <span className="text-muted-foreground">Focus Time</span>
+            <span className="text-muted-foreground">
+              {mode === "focus" ? `${Math.floor(getFocusTotalSeconds() / 60)} min focus` : `break`}
+            </span>
           </div>
         </div>
       </div>
 
       {/* Timer Controls */}
       <div className="flex justify-center space-x-4">
-        <Button size="lg" onClick={() => setIsTimerRunning(!isTimerRunning)} className="w-24 h-12">
+        <Button size="lg" onClick={() => { ensureNotificationPermission(); setIsTimerRunning(!isTimerRunning) }} className="w-24 h-12">
           {isTimerRunning ? <Pause className="w-5 h-5" /> : <Play className="w-5 h-5" />}
         </Button>
-        <Button variant="outline" size="lg" className="w-24 h-12 glass-card bg-transparent">
+        <Button
+          variant="outline"
+          size="lg"
+          className="w-24 h-12 glass-card bg-transparent"
+          onClick={() => {
+            setIsTimerRunning(false)
+            setTimeLeft((mode === "focus" ? getFocusTotalSeconds() : shortBreakMinutes * 60))
+          }}
+        >
           Reset
         </Button>
       </div>
@@ -203,7 +377,7 @@ export function Dashboard() {
     <div className="space-y-6 page-transition">
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-bold text-foreground">Tasks</h1>
-        <Button>
+        <Button onClick={() => setNewtask(true)}>
           <Plus className="w-4 h-4 mr-2" />
           New Task
         </Button>
@@ -227,11 +401,25 @@ export function Dashboard() {
                     </Badge>
                     <span className="text-xs text-muted-foreground flex items-center">
                       <Clock className="w-3 h-3 mr-1" />
-                      25 min
+                      {task.durationMinutes} min
                     </span>
                   </div>
                 </div>
                 {task.completed && <CheckCircle2 className="w-5 h-5 text-accent" />}
+                <Button
+                  size="sm"
+                  variant={task.completed ? "outline" : "default"}
+                  onClick={() => toggleTaskCompleted(task.id)}
+                >
+                  {task.completed ? "Undo" : "Complete"}
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => selectTaskForFocus(task.id)}
+                >
+                  Focus
+                </Button>
               </div>
             </CardContent>
           </Card>
@@ -259,7 +447,9 @@ export function Dashboard() {
         {activeTab === "home" && renderHomeScreen()}
         {activeTab === "timer" && renderTimerScreen()}
         {activeTab === "tasks" && renderTasksScreen()}
-        {activeTab === "settings" && <SettingsPage onBack={() => setActiveTab("home")} />}
+        {activeTab === "settings" && (
+          <SettingsPage onBack={() => setActiveTab("home")} />
+        )}
       </div>
 
       <div className="fixed bottom-0 left-0 right-0 glass-bottom-nav border-t border-border">
@@ -306,6 +496,46 @@ export function Dashboard() {
           </Button>
         </div>
       </div>
+
+      <Dialog open={newTask} onOpenChange={setNewtask}>
+        <DialogContent className="glass-card" showCloseButton>
+          <DialogHeader>
+            <DialogTitle>Add New Task</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <label className="text-sm font-medium text-foreground">Title</label>
+              <Input
+                placeholder="Task title"
+                value={newTaskTitle}
+                onChange={(e) => setNewTaskTitle(e.target.value)}
+                autoFocus
+              />
+            </div>
+            <div className="space-y-2">
+              <label className="text-sm font-medium text-foreground">Category</label>
+              <Input
+                placeholder="e.g. Design, Development"
+                value={newTaskCategory}
+                onChange={(e) => setNewTaskCategory(e.target.value)}
+              />
+            </div>
+          <div className="space-y-2">
+            <label className="text-sm font-medium text-foreground">Duration (minutes)</label>
+            <Input
+              type="number"
+              min={1}
+              value={newTaskDuration}
+              onChange={(e) => setNewTaskDuration(Number(e.target.value))}
+            />
+          </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setNewtask(false)}>Cancel</Button>
+            <Button onClick={addNewTask} disabled={!newTaskTitle.trim()}>Add Task</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

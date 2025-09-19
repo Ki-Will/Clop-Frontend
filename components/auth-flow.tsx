@@ -27,6 +27,11 @@ export function AuthFlow({ onComplete }: AuthFlowProps) {
 
   const handleInputChange = (field: string, value: string) => {
     setFormData((prev) => ({ ...prev, [field]: value }))
+    if (field === "username") {
+      try {
+        window.localStorage.setItem("username", value)
+      } catch {}
+    }
   }
 
   const handleSocialLogin = (provider: string) => {
@@ -48,6 +53,9 @@ export function AuthFlow({ onComplete }: AuthFlowProps) {
   }
 
   const handleProfileComplete = () => {
+    try {
+      if (formData.username) window.localStorage.setItem("username", formData.username)
+    } catch {}
     onComplete()
   }
 

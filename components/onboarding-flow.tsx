@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import { Button } from "@/components/ui/button"
 import { ChevronRight, Target, TrendingUp, Trophy } from "lucide-react"
 
@@ -31,13 +31,18 @@ const onboardingSlides = [
 
 export function OnboardingFlow({ onComplete }: OnboardingFlowProps) {
   const [currentSlide, setCurrentSlide] = useState(0)
+  const [phase, setPhase] = useState<"idle" | "out" | "in">("idle")
 
   const handleNext = () => {
-    if (currentSlide < onboardingSlides.length - 1) {
-      setCurrentSlide(currentSlide + 1)
-    } else {
-      onComplete()
-    }
+    if (currentSlide >= onboardingSlides.length - 1) return onComplete()
+    setPhase("out")
+    setTimeout(() => {
+      setCurrentSlide((s) => s + 1)
+      setPhase("in")
+      requestAnimationFrame(() => {
+        setTimeout(() => setPhase("idle"), 200)
+      })
+    }, 200)
   }
 
   const handleSkip = () => {
@@ -46,6 +51,12 @@ export function OnboardingFlow({ onComplete }: OnboardingFlowProps) {
 
   const slide = onboardingSlides[currentSlide]
   const Icon = slide.icon
+  const transitionClass =
+    phase === "out"
+      ? "opacity-0 translate-y-2"
+      : phase === "in"
+        ? "opacity-0 -translate-y-2"
+        : "opacity-100 translate-y-0"
 
   return (
     <div className="flex flex-col min-h-screen bg-background px-6 py-8">
@@ -57,20 +68,20 @@ export function OnboardingFlow({ onComplete }: OnboardingFlowProps) {
       </div>
 
       {/* Content */}
-      <div className="flex-1 flex flex-col items-center justify-center space-y-8">
+      <div className="flex-1 flex flex-col items-center justify-center space-y-8 transition-all duration-300 ease-out">
         {/* Illustration */}
-        <div className="w-32 h-32 bg-card rounded-full flex items-center justify-center">
+        <div className={`w-32 h-32 bg-card rounded-full flex items-center justify-center transform transition-all duration-300 ease-out ${transitionClass}`}>
           <Icon className={`w-16 h-16 ${slide.color}`} />
         </div>
 
         {/* Text Content */}
-        <div className="text-center space-y-4 max-w-sm">
+        <div className={`text-center space-y-4 max-w-sm transform transition-all duration-300 ease-out ${transitionClass}`}>
           <h2 className="text-2xl font-bold text-foreground">{slide.title}</h2>
           <p className="text-muted-foreground text-lg leading-relaxed">{slide.description}</p>
         </div>
 
         {/* Progress Indicators */}
-        <div className="flex space-x-2">
+        <div className={`flex space-x-2 transform transition-all duration-300 ease-out ${transitionClass}`}>
           {onboardingSlides.map((_, index) => (
             <div
               key={index}
