@@ -1,202 +1,128 @@
 "use client"
 
-import React, { useState } from "react"
+import React, { useState, useEffect } from "react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Switch } from "@/components/ui/switch"
 import { Badge } from "@/components/ui/badge"
-import { Bell, Palette, Shield, Download, Trash2, User, Settings, ChevronRight } from "lucide-react"
+import { Input } from "@/components/ui/input"
+import { Bell, Palette, Shield, Download, Trash2, User, Settings, ChevronRight, LogOut, Loader2 } from "lucide-react"
 import { ThemeToggle } from "@/components/theme-toggle"
+import { useAuth } from "./auth-context"
+import { apiClient, UserSettingsData, UserStats } from "@/lib/api-client"
+import { toast } from "sonner"
 
 interface SettingsPageProps {
   onBack: () => void
 }
 
 export function SettingsPage({ onBack }: SettingsPageProps) {
-  const [notifications, setNotifications] = useState(true)
-  const [soundEnabled, setSoundEnabled] = useState(true)
-  const [vibrationEnabled, setVibrationEnabled] = useState(false)
-  const [displayName, setDisplayName] = useState("")
+  const { user, updateProfile, logout } = useAuth()
 
-  const isMobileDevice = () => {
-    if (typeof navigator === "undefined") return false
-    return /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent)
-  }
+  const [settings, setSettings] = useState<UserSettingsData>({
+    id: 0,
+    userId: user?.id || 0,
+    notifications: true,
+    soundEnabled: true,
+    vibrationEnabled: false,
+  })
 
-  // Load persisted settings
-  React.useEffect(() => {
-    try {
-      const name = window.localStorage.getItem("username") || ""
-      setDisplayName(name)
-      const sound = window.localStorage.getItem("soundEnabled")
-      const vibr = window.localStorage.getItem("vibrationEnabled")
-      if (sound !== null) setSoundEnabled(sound === "true")
-      if (vibr !== null) setVibrationEnabled(vibr === "true")
-    } catch {}
+  const [stats, setStats] = useState<UserStats>({
+    totalSessions: 0,
+    totalFocusMinutes: 0,
+    totalFocusHours: "0.0h",
+    completedTasksCount: 0,
+    dayStreak: 0,
+    todaysSessionsCount: 0,
+    dailyGoalCount: 4,
+    dailyProgress: 0,
+  })
+
+  const [displayName, setDisplayName] = useState(user?.username || "")
+  const [isSavingName, setIsSavingName] = useState(false)
+  const [isExporting, setIsExporting] = useState(false)
+  const [isClearing, setIsClearing] = useState(false)
+
+  useEffect(() => {
+    if (user?.username) {
+      setDisplayName(user.username)
+    }
+  }, [user])
+
+  useEffect(() => {
+    apiClient.settings
+      .getSettings()
+      .then((data) => setSettings(data))
+      .catch(() => {})
+
+    apiClient.sessions
+      .getStats()
+      .then((data) => setStats(data))
+      .catch(() => {})
   }, [])
 
-  const settingsSections = [
-    // Timer durations are now set when creating tasks
-    {
-      title: "Notifications",
-      icon: Bell,
-      items: [
-        {
-          label: "Push Notifications",
-          description: "Get notified when timers complete",
-          type: "switch" as const,
-          value: notifications,
-          onChange: (v: boolean) => {
-            setNotifications(v)
-          },
-        },
-        {
-          label: "Sound Alerts",
-          description: "Play sound when timer ends",
-          type: "switch" as const,
-          value: soundEnabled,
-          onChange: (v: boolean) => {
-            setSoundEnabled(v)
-            try { window.localStorage.setItem("soundEnabled", String(v)) } catch {}
-          },
-        },
-        ...(isMobileDevice()
-          ? [{
-              label: "Vibration",
-              description: "Vibrate device on timer completion",
-              type: "switch" as const,
-              value: vibrationEnabled,
-              onChange: (v: boolean) => {
-                setVibrationEnabled(v)
-                try { window.localStorage.setItem("vibrationEnabled", String(v)) } catch {}
-              },
-            }]
-          : []),
-      ],
-    },
-    {
-      title: "Appearance",
-      icon: Palette,
-      items: [
-        {
-          label: "Theme",
-          description: "Switch between light and dark mode",
-          type: "theme" as const,
-        },
-      ],
-    },
-    {
-      title: "Profile",
-      icon: User,
-      items: [
-        {
-          label: "Display Name",
-          description: "Shown on the Home screen",
-          type: "profile" as const,
-        },
-      ],
-    },
-    {
-      title: "Data & Privacy",
-      icon: Shield,
-      items: [
-        {
-          label: "Export Data",
-          description: "Download your productivity data",
-          type: "action" as const,
-          action: () => console.log("Exporting data..."),
-        },
-        {
-          label: "Clear All Data",
-          description: "Reset all tasks and statistics",
-          type: "action" as const,
-          action: () => console.log("Clearing data..."),
-          destructive: true,
-        },
-      ],
-    },
-  ]
+  const handleSettingToggle = async (key: "notifications" | "soundEnabled" | "vibrationEnabled", value: boolean) => {
+    setSettings((prev) => ({ ...prev, [key]: value }))
+    try {
+      await apiClient.settings.updateSettings({ [key]: value })
+      toast.success("Settings saved")
+    } catch {
+      toast.error("Failed to update settings")
+    }
+  }
 
-  const renderSettingItem = (item: any) => {
-    switch (item.type) {
-      case "switch":
-        return (
-          <div className="flex items-center justify-between">
-            <div className="flex-1">
-              <p className="font-medium text-foreground">{item.label}</p>
-              <p className="text-sm text-muted-foreground">{item.description}</p>
-            </div>
-            <Switch checked={item.value} onCheckedChange={item.onChange} />
-          </div>
-        )
+  const handleSaveDisplayName = async () => {
+    if (!displayName.trim()) return
+    try {
+      setIsSavingName(true)
+      await updateProfile({ username: displayName.trim() })
+      toast.success("Profile name updated")
+    } catch {
+      toast.error("Failed to save display name")
+    } finally {
+      setIsSavingName(false)
+    }
+  }
 
-      case "slider":
-        return null
+  const handleExportData = async () => {
+    try {
+      setIsExporting(true)
+      const data = await apiClient.settings.exportData()
+      const jsonString = `data:text/json;charset=utf-8,${encodeURIComponent(JSON.stringify(data, null, 2))}`
+      const downloadAnchor = document.createElement("a")
+      downloadAnchor.setAttribute("href", jsonString)
+      downloadAnchor.setAttribute("download", `clop-backup-${new Date().toISOString().split("T")[0]}.json`)
+      document.body.appendChild(downloadAnchor)
+      downloadAnchor.click()
+      downloadAnchor.remove()
+      toast.success("Productivity data exported successfully")
+    } catch {
+      toast.error("Failed to export data")
+    } finally {
+      setIsExporting(false)
+    }
+  }
 
-      case "theme":
-        return (
-          <div className="flex items-center justify-between">
-            <div className="flex-1">
-              <p className="font-medium text-foreground">{item.label}</p>
-              <p className="text-sm text-muted-foreground">{item.description}</p>
-            </div>
-            <ThemeToggle />
-          </div>
-        )
+  const handleClearData = async () => {
+    if (!window.confirm("Are you sure you want to clear all your tasks and focus statistics? This action cannot be undone.")) {
+      return
+    }
 
-      case "profile":
-        return (
-          <div className="space-y-3">
-            <div className="flex items-center justify-between">
-              <div className="flex-1">
-                <p className="font-medium text-foreground">{item.label}</p>
-                <p className="text-sm text-muted-foreground">{item.description}</p>
-              </div>
-            </div>
-            <div className="space-y-2">
-              <input
-                className="border-input dark:bg-input/30 w-full rounded-md border bg-transparent px-3 py-2 text-sm outline-none"
-                placeholder="Enter your display name"
-                value={displayName}
-                onChange={(e) => setDisplayName(e.target.value)}
-              />
-              <div className="flex justify-end">
-                <Button
-                  onClick={() => {
-                    try {
-                      window.localStorage.setItem("username", displayName || "")
-                    } catch {}
-                  }}
-                >
-                  Save
-                </Button>
-              </div>
-            </div>
-          </div>
-        )
-
-      case "action":
-        return (
-          <Button
-            variant={item.destructive ? "destructive" : "outline"}
-            className="w-full justify-between glass-card bg-transparent"
-            onClick={item.action}
-          >
-            <div className="text-left">
-              <p className="font-medium">{item.label}</p>
-              <p className="text-sm opacity-70">{item.description}</p>
-            </div>
-            {item.destructive ? <Trash2 className="w-4 h-4" /> : <Download className="w-4 h-4" />}
-          </Button>
-        )
-
-      default:
-        return null
+    try {
+      setIsClearing(true)
+      await apiClient.users.clearData()
+      toast.success("All data cleared")
+      const updatedStats = await apiClient.sessions.getStats()
+      setStats(updatedStats)
+    } catch {
+      toast.error("Failed to clear user data")
+    } finally {
+      setIsClearing(false)
     }
   }
 
   return (
-    <div className="space-y-6 page-transition">
+    <div className="space-y-6 page-transition max-w-2xl mx-auto">
       {/* Header */}
       <div className="flex items-center space-x-4">
         <Button variant="ghost" size="sm" onClick={onBack} className="glass-card bg-transparent">
@@ -204,11 +130,11 @@ export function SettingsPage({ onBack }: SettingsPageProps) {
         </Button>
         <div>
           <h1 className="text-2xl font-bold text-foreground">Settings</h1>
-          <p className="text-muted-foreground">Customize your productivity experience</p>
+          <p className="text-muted-foreground">Customize your Clop app experience</p>
         </div>
       </div>
 
-      {/* Profile Section */}
+      {/* Profile Card */}
       <Card className="glass-card">
         <CardContent className="p-6">
           <div className="flex items-center space-x-4">
@@ -216,74 +142,164 @@ export function SettingsPage({ onBack }: SettingsPageProps) {
               <User className="w-8 h-8 text-primary" />
             </div>
             <div className="flex-1">
-              <h3 className="text-lg font-semibold text-foreground">Alex Johnson</h3>
-              <p className="text-muted-foreground">alex.johnson@example.com</p>
+              <h3 className="text-lg font-semibold text-foreground">{user?.username || "User"}</h3>
+              <p className="text-sm text-muted-foreground">{user?.email}</p>
               <div className="flex items-center space-x-2 mt-2">
                 <Badge variant="secondary" className="text-xs">
-                  Pro Member
-                </Badge>
-                <Badge variant="outline" className="text-xs">
-                  Level 12
+                  Active User
                 </Badge>
               </div>
+            </div>
+            <Button variant="destructive" size="sm" onClick={logout}>
+              <LogOut className="w-4 h-4 mr-1" />
+              Logout
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Profile Display Name Edit */}
+      <Card className="glass-card">
+        <CardHeader>
+          <CardTitle className="flex items-center space-x-2">
+            <User className="w-5 h-5 text-primary" />
+            <span>Profile Information</span>
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="space-y-2">
+            <label className="text-sm font-medium text-foreground">Display Name</label>
+            <div className="flex space-x-2">
+              <Input
+                placeholder="Enter display name"
+                value={displayName}
+                onChange={(e) => setDisplayName(e.target.value)}
+              />
+              <Button onClick={handleSaveDisplayName} disabled={isSavingName}>
+                {isSavingName ? <Loader2 className="w-4 h-4 animate-spin mr-1" /> : null}
+                Save
+              </Button>
             </div>
           </div>
         </CardContent>
       </Card>
 
-      {/* Settings Sections */}
-      {settingsSections.map((section, sectionIndex) => (
-        <Card key={sectionIndex} className="glass-card">
-          <CardHeader>
-            <CardTitle className="flex items-center space-x-2">
-              <section.icon className="w-5 h-5 text-primary" />
-              <span>{section.title}</span>
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-6">
-            {section.items.map((item, itemIndex) => (
-              <div key={itemIndex}>{renderSettingItem(item)}</div>
-            ))}
-          </CardContent>
-        </Card>
-      ))}
+      {/* Notifications & Audio */}
+      <Card className="glass-card">
+        <CardHeader>
+          <CardTitle className="flex items-center space-x-2">
+            <Bell className="w-5 h-5 text-primary" />
+            <span>Notifications & Sounds</span>
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-6">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="font-medium text-foreground">Push Notifications</p>
+              <p className="text-sm text-muted-foreground">Receive notifications when timers end</p>
+            </div>
+            <Switch
+              checked={settings.notifications}
+              onCheckedChange={(val) => handleSettingToggle("notifications", val)}
+            />
+          </div>
 
-      {/* Statistics Card */}
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="font-medium text-foreground">Sound Alerts</p>
+              <p className="text-sm text-muted-foreground">Play a tone on session completion</p>
+            </div>
+            <Switch
+              checked={settings.soundEnabled}
+              onCheckedChange={(val) => handleSettingToggle("soundEnabled", val)}
+            />
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Appearance */}
+      <Card className="glass-card">
+        <CardHeader>
+          <CardTitle className="flex items-center space-x-2">
+            <Palette className="w-5 h-5 text-primary" />
+            <span>Appearance</span>
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="font-medium text-foreground">Theme</p>
+              <p className="text-sm text-muted-foreground">Switch between light and dark mode</p>
+            </div>
+            <ThemeToggle />
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Data & Privacy */}
+      <Card className="glass-card">
+        <CardHeader>
+          <CardTitle className="flex items-center space-x-2">
+            <Shield className="w-5 h-5 text-primary" />
+            <span>Data & Privacy</span>
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <Button
+            variant="outline"
+            className="w-full justify-between glass-card bg-transparent"
+            onClick={handleExportData}
+            disabled={isExporting}
+          >
+            <div className="text-left">
+              <p className="font-medium">Export Data</p>
+              <p className="text-xs text-muted-foreground">Download backup of tasks and stats in JSON format</p>
+            </div>
+            {isExporting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
+          </Button>
+
+          <Button
+            variant="destructive"
+            className="w-full justify-between"
+            onClick={handleClearData}
+            disabled={isClearing}
+          >
+            <div className="text-left">
+              <p className="font-medium">Clear All Data</p>
+              <p className="text-xs opacity-80">Delete all your tasks and focus statistics</p>
+            </div>
+            {isClearing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />}
+          </Button>
+        </CardContent>
+      </Card>
+
+      {/* Your Statistics Summary */}
       <Card className="glass-card">
         <CardHeader>
           <CardTitle className="flex items-center space-x-2">
             <Settings className="w-5 h-5 text-primary" />
-            <span>Your Statistics</span>
+            <span>Your Overall Statistics</span>
           </CardTitle>
         </CardHeader>
         <CardContent>
           <div className="grid grid-cols-2 gap-4">
             <div className="text-center p-4 glass-card rounded-lg">
-              <div className="text-2xl font-bold text-primary">127</div>
-              <div className="text-sm text-muted-foreground">Total Sessions</div>
+              <div className="text-2xl font-bold text-primary">{stats.totalSessions}</div>
+              <div className="text-xs text-muted-foreground">Total Sessions</div>
             </div>
             <div className="text-center p-4 glass-card rounded-lg">
-              <div className="text-2xl font-bold text-secondary">52h</div>
-              <div className="text-sm text-muted-foreground">Focus Time</div>
+              <div className="text-2xl font-bold text-secondary">{stats.totalFocusHours}</div>
+              <div className="text-xs text-muted-foreground">Focus Time</div>
             </div>
             <div className="text-center p-4 glass-card rounded-lg">
-              <div className="text-2xl font-bold text-foreground">89</div>
-              <div className="text-sm text-muted-foreground">Tasks Done</div>
+              <div className="text-2xl font-bold text-foreground">{stats.completedTasksCount}</div>
+              <div className="text-xs text-muted-foreground">Tasks Completed</div>
             </div>
             <div className="text-center p-4 glass-card rounded-lg">
-              <div className="text-2xl font-bold text-accent">12</div>
-              <div className="text-sm text-muted-foreground">Day Streak</div>
+              <div className="text-2xl font-bold text-accent">{stats.dayStreak}</div>
+              <div className="text-xs text-muted-foreground">Day Streak</div>
             </div>
           </div>
-        </CardContent>
-      </Card>
-
-      {/* App Info */}
-      <Card className="glass-card">
-        <CardContent className="p-6 text-center space-y-2">
-          <h3 className="font-semibold text-foreground">FocusFlow</h3>
-          <p className="text-sm text-muted-foreground">Version 2.1.0</p>
-          <p className="text-xs text-muted-foreground">Built with ❤️ for productivity enthusiasts</p>
         </CardContent>
       </Card>
     </div>
