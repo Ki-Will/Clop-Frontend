@@ -6,17 +6,23 @@ import { Input } from "@/components/ui/input"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Label } from "@/components/ui/label"
 import { Separator } from "@/components/ui/separator"
-import { Eye, EyeOff, Mail, Lock, User, Phone, MapPin } from "lucide-react"
+import { Eye, EyeOff, Mail, Lock, User, Phone, MapPin, Loader2, AlertCircle } from "lucide-react"
+import { useAuth } from "./auth-context"
+import { toast } from "sonner"
 
 interface AuthFlowProps {
   onComplete: () => void
 }
 
-type AuthScreen = "login" | "signup" | "profile" | "forgot-password" | "verify-code" | "reset-password"
+type AuthScreen = "login" | "signup" | "profile"
 
 export function AuthFlow({ onComplete }: AuthFlowProps) {
+  const { login, register, updateProfile } = useAuth()
   const [currentScreen, setCurrentScreen] = useState<AuthScreen>("login")
   const [showPassword, setShowPassword] = useState(false)
+  const [isSubmitting, setIsSubmitting] = useState(false)
+  const [errorMessage, setErrorMessage] = useState<string | null>(null)
+
   const [formData, setFormData] = useState({
     email: "",
     password: "",
@@ -26,74 +32,100 @@ export function AuthFlow({ onComplete }: AuthFlowProps) {
   })
 
   const handleInputChange = (field: string, value: string) => {
+    setErrorMessage(null)
     setFormData((prev) => ({ ...prev, [field]: value }))
-    if (field === "username") {
-      try {
-        window.localStorage.setItem("username", value)
-      } catch {}
+  }
+
+  const handleLogin = async (e: React.FormEvent) => {
+    e.preventDefault()
+    setErrorMessage(null)
+
+    if (!formData.email || !formData.password) {
+      setErrorMessage("Please enter both email and password")
+      return
+    }
+
+    try {
+      setIsSubmitting(true)
+      await login(formData.email, formData.password)
+      toast.success("Welcome back!")
+      onComplete()
+    } catch (err: any) {
+      setErrorMessage(err.message || "Failed to sign in. Please check your credentials.")
+      toast.error(err.message || "Sign in failed")
+    } finally {
+      setIsSubmitting(false)
     }
   }
 
-  const handleSocialLogin = (provider: string) => {
-    // Simulate social login
-    setTimeout(() => {
-      onComplete()
-    }, 1000)
-  }
+  const handleSignup = async (e: React.FormEvent) => {
+    e.preventDefault()
+    setErrorMessage(null)
 
-  const handleLogin = () => {
-    // Simulate login
-    setTimeout(() => {
-      onComplete()
-    }, 1000)
-  }
+    if (!formData.email || !formData.password) {
+      setErrorMessage("Please fill in all required fields")
+      return
+    }
 
-  const handleSignup = () => {
-    setCurrentScreen("profile")
-  }
+    if (formData.password.length < 6) {
+      setErrorMessage("Password must be at least 6 characters long")
+      return
+    }
 
-  const handleProfileComplete = () => {
     try {
-      if (formData.username) window.localStorage.setItem("username", formData.username)
-    } catch {}
-    onComplete()
+      setIsSubmitting(true)
+      await register({
+        email: formData.email,
+        password: formData.password,
+        username: formData.username || undefined,
+      })
+      toast.success("Account created successfully!")
+      setCurrentScreen("profile")
+    } catch (err: any) {
+      setErrorMessage(err.message || "Registration failed")
+      toast.error(err.message || "Registration failed")
+    } finally {
+      setIsSubmitting(false)
+    }
+  }
+
+  const handleProfileComplete = async (e: React.FormEvent) => {
+    e.preventDefault()
+    setErrorMessage(null)
+
+    try {
+      setIsSubmitting(true)
+      if (formData.phone || formData.address || formData.username) {
+        await updateProfile({
+          username: formData.username || undefined,
+          phone: formData.phone || undefined,
+          address: formData.address || undefined,
+        })
+      }
+      toast.success("Profile setup complete!")
+      onComplete()
+    } catch (err: any) {
+      setErrorMessage(err.message || "Profile update failed")
+    } finally {
+      setIsSubmitting(false)
+    }
   }
 
   const renderLoginScreen = () => (
-    <Card className="w-full max-w-sm mx-auto">
+    <Card className="w-full max-w-sm mx-auto glass-card">
       <CardHeader className="text-center">
         <CardTitle className="text-2xl font-bold">Welcome Back</CardTitle>
-        <p className="text-muted-foreground">Sign in to your account</p>
+        <p className="text-muted-foreground">Sign in to your Clop account</p>
       </CardHeader>
       <CardContent className="space-y-4">
-        {/* Social Login Buttons */}
-        <div className="space-y-3">
-          <Button variant="outline" className="w-full h-12 bg-transparent" onClick={() => handleSocialLogin("google")}>
-            <div className="w-5 h-5 bg-primary rounded mr-2"></div>
-            Continue with Google
-          </Button>
-          <Button variant="outline" className="w-full h-12 bg-transparent" onClick={() => handleSocialLogin("apple")}>
-            <div className="w-5 h-5 bg-foreground rounded mr-2"></div>
-            Continue with Apple
-          </Button>
-          <Button
-            variant="outline"
-            className="w-full h-12 bg-transparent"
-            onClick={() => handleSocialLogin("facebook")}
-          >
-            <div className="w-5 h-5 bg-blue-600 rounded mr-2"></div>
-            Continue with Facebook
-          </Button>
-        </div>
+        {errorMessage && (
+          <div className="flex items-center space-x-2 text-sm p-3 bg-destructive/10 text-destructive rounded-lg border border-destructive/20">
+            <AlertCircle className="w-4 h-4 shrink-0" />
+            <span>{errorMessage}</span>
+          </div>
+        )}
 
-        <div className="flex items-center space-x-4">
-          <Separator className="flex-1" />
-          <span className="text-muted-foreground text-sm">or</span>
-          <Separator className="flex-1" />
-        </div>
-
-        {/* Email/Password Form */}
-        <div className="space-y-4">
+        <form onSubmit={handleLogin} className="space-y-4">
           <div className="space-y-2">
             <Label htmlFor="email">Email</Label>
             <div className="relative">
@@ -105,6 +137,7 @@ export function AuthFlow({ onComplete }: AuthFlowProps) {
                 className="pl-10"
                 value={formData.email}
                 onChange={(e) => handleInputChange("email", e.target.value)}
+                required
               />
             </div>
           </div>
@@ -120,33 +153,34 @@ export function AuthFlow({ onComplete }: AuthFlowProps) {
                 className="pl-10 pr-10"
                 value={formData.password}
                 onChange={(e) => handleInputChange("password", e.target.value)}
+                required
               />
               <button
                 type="button"
                 onClick={() => setShowPassword(!showPassword)}
-                className="absolute right-3 top-3 text-muted-foreground"
+                className="absolute right-3 top-3 text-muted-foreground hover:text-foreground"
               >
                 {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
               </button>
             </div>
           </div>
 
-          <Button
-            onClick={() => setCurrentScreen("forgot-password")}
-            variant="link"
-            className="p-0 h-auto text-primary"
-          >
-            Forgot password?
+          <Button type="submit" disabled={isSubmitting} className="w-full h-12">
+            {isSubmitting ? <Loader2 className="w-5 h-5 animate-spin mr-2" /> : null}
+            {isSubmitting ? "Signing in..." : "Sign In"}
           </Button>
+        </form>
 
-          <Button onClick={handleLogin} className="w-full h-12">
-            Sign In
-          </Button>
-        </div>
-
-        <div className="text-center">
+        <div className="text-center text-sm pt-2">
           <span className="text-muted-foreground">Don't have an account? </span>
-          <Button onClick={() => setCurrentScreen("signup")} variant="link" className="p-0 h-auto text-primary">
+          <Button
+            onClick={() => {
+              setErrorMessage(null)
+              setCurrentScreen("signup")
+            }}
+            variant="link"
+            className="p-0 h-auto text-primary font-semibold"
+          >
             Sign up
           </Button>
         </div>
@@ -155,13 +189,20 @@ export function AuthFlow({ onComplete }: AuthFlowProps) {
   )
 
   const renderSignupScreen = () => (
-    <Card className="w-full max-w-sm mx-auto">
+    <Card className="w-full max-w-sm mx-auto glass-card">
       <CardHeader className="text-center">
         <CardTitle className="text-2xl font-bold">Create Account</CardTitle>
-        <p className="text-muted-foreground">Join FocusFlow today</p>
+        <p className="text-muted-foreground">Join Clop productivity app today</p>
       </CardHeader>
       <CardContent className="space-y-4">
-        <div className="space-y-4">
+        {errorMessage && (
+          <div className="flex items-center space-x-2 text-sm p-3 bg-destructive/10 text-destructive rounded-lg border border-destructive/20">
+            <AlertCircle className="w-4 h-4 shrink-0" />
+            <span>{errorMessage}</span>
+          </div>
+        )}
+
+        <form onSubmit={handleSignup} className="space-y-4">
           <div className="space-y-2">
             <Label htmlFor="signup-username">Username</Label>
             <div className="relative">
@@ -187,6 +228,7 @@ export function AuthFlow({ onComplete }: AuthFlowProps) {
                 className="pl-10"
                 value={formData.email}
                 onChange={(e) => handleInputChange("email", e.target.value)}
+                required
               />
             </div>
           </div>
@@ -198,29 +240,38 @@ export function AuthFlow({ onComplete }: AuthFlowProps) {
               <Input
                 id="signup-password"
                 type={showPassword ? "text" : "password"}
-                placeholder="Create a password"
+                placeholder="At least 6 characters"
                 className="pl-10 pr-10"
                 value={formData.password}
                 onChange={(e) => handleInputChange("password", e.target.value)}
+                required
               />
               <button
                 type="button"
                 onClick={() => setShowPassword(!showPassword)}
-                className="absolute right-3 top-3 text-muted-foreground"
+                className="absolute right-3 top-3 text-muted-foreground hover:text-foreground"
               >
                 {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
               </button>
             </div>
           </div>
 
-          <Button onClick={handleSignup} className="w-full h-12">
-            Create Account
+          <Button type="submit" disabled={isSubmitting} className="w-full h-12">
+            {isSubmitting ? <Loader2 className="w-5 h-5 animate-spin mr-2" /> : null}
+            {isSubmitting ? "Creating Account..." : "Create Account"}
           </Button>
-        </div>
+        </form>
 
-        <div className="text-center">
+        <div className="text-center text-sm pt-2">
           <span className="text-muted-foreground">Already have an account? </span>
-          <Button onClick={() => setCurrentScreen("login")} variant="link" className="p-0 h-auto text-primary">
+          <Button
+            onClick={() => {
+              setErrorMessage(null)
+              setCurrentScreen("login")
+            }}
+            variant="link"
+            className="p-0 h-auto text-primary font-semibold"
+          >
             Sign in
           </Button>
         </div>
@@ -229,25 +280,22 @@ export function AuthFlow({ onComplete }: AuthFlowProps) {
   )
 
   const renderProfileScreen = () => (
-    <Card className="w-full max-w-sm mx-auto">
+    <Card className="w-full max-w-sm mx-auto glass-card">
       <CardHeader className="text-center">
         <CardTitle className="text-2xl font-bold">Complete Profile</CardTitle>
-        <p className="text-muted-foreground">Tell us more about yourself</p>
+        <p className="text-muted-foreground">Customize your profile info</p>
       </CardHeader>
       <CardContent className="space-y-4">
-        {/* Profile Photo */}
-        <div className="flex flex-col items-center space-y-4">
-          <div className="w-20 h-20 bg-muted rounded-full flex items-center justify-center">
-            <User className="w-10 h-10 text-muted-foreground" />
+        {errorMessage && (
+          <div className="flex items-center space-x-2 text-sm p-3 bg-destructive/10 text-destructive rounded-lg border border-destructive/20">
+            <AlertCircle className="w-4 h-4 shrink-0" />
+            <span>{errorMessage}</span>
           </div>
-          <Button variant="outline" size="sm">
-            Upload Photo
-          </Button>
-        </div>
+        )}
 
-        <div className="space-y-4">
+        <form onSubmit={handleProfileComplete} className="space-y-4">
           <div className="space-y-2">
-            <Label htmlFor="profile-phone">Phone Number</Label>
+            <Label htmlFor="profile-phone">Phone Number (Optional)</Label>
             <div className="relative">
               <Phone className="absolute left-3 top-3 w-4 h-4 text-muted-foreground" />
               <Input
@@ -261,12 +309,12 @@ export function AuthFlow({ onComplete }: AuthFlowProps) {
           </div>
 
           <div className="space-y-2">
-            <Label htmlFor="profile-address">Address</Label>
+            <Label htmlFor="profile-address">Address (Optional)</Label>
             <div className="relative">
               <MapPin className="absolute left-3 top-3 w-4 h-4 text-muted-foreground" />
               <Input
                 id="profile-address"
-                placeholder="Enter your address"
+                placeholder="Enter your location"
                 className="pl-10"
                 value={formData.address}
                 onChange={(e) => handleInputChange("address", e.target.value)}
@@ -274,16 +322,17 @@ export function AuthFlow({ onComplete }: AuthFlowProps) {
             </div>
           </div>
 
-          <Button onClick={handleProfileComplete} className="w-full h-12">
-            Complete Setup
+          <Button type="submit" disabled={isSubmitting} className="w-full h-12">
+            {isSubmitting ? <Loader2 className="w-5 h-5 animate-spin mr-2" /> : null}
+            {isSubmitting ? "Saving..." : "Complete Setup & Go to App"}
           </Button>
-        </div>
+        </form>
       </CardContent>
     </Card>
   )
 
   return (
-    <div className="flex flex-col min-h-screen bg-background px-6 py-8 justify-center">
+    <div className="flex flex-col min-h-screen bg-background px-6 py-8 justify-center page-transition">
       {currentScreen === "login" && renderLoginScreen()}
       {currentScreen === "signup" && renderSignupScreen()}
       {currentScreen === "profile" && renderProfileScreen()}
