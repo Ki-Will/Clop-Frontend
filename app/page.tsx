@@ -5,35 +5,59 @@ import { SplashScreen } from "@/components/splash-screen"
 import { OnboardingFlow } from "@/components/onboarding-flow"
 import { AuthFlow } from "@/components/auth-flow"
 import { Dashboard } from "@/components/dashboard"
+import { AuthProvider, useAuth } from "@/components/auth-context"
+import { Toaster } from "@/components/ui/sonner"
 
-export default function Home() {
+function MainContent() {
+  const { user, loading } = useAuth()
   const [currentScreen, setCurrentScreen] = useState<"splash" | "onboarding" | "auth" | "dashboard">("splash")
-  const [isAuthenticated, setIsAuthenticated] = useState(false)
 
   useEffect(() => {
-    // Simulate splash screen duration
     const timer = setTimeout(() => {
-      setCurrentScreen("onboarding")
-    }, 2000)
+      if (user) {
+        setCurrentScreen("dashboard")
+      } else {
+        const hasSeenOnboarding = typeof window !== "undefined" ? localStorage.getItem("has_seen_onboarding") : null
+        setCurrentScreen(hasSeenOnboarding ? "auth" : "onboarding")
+      }
+    }, 1500)
 
     return () => clearTimeout(timer)
-  }, [])
+  }, [user])
 
   const handleOnboardingComplete = () => {
-    setCurrentScreen("auth")
+    if (typeof window !== "undefined") {
+      localStorage.setItem("has_seen_onboarding", "true")
+    }
+    if (user) {
+      setCurrentScreen("dashboard")
+    } else {
+      setCurrentScreen("auth")
+    }
   }
 
   const handleAuthComplete = () => {
-    setIsAuthenticated(true)
     setCurrentScreen("dashboard")
+  }
+
+  if (loading || currentScreen === "splash") {
+    return <SplashScreen />
   }
 
   return (
     <main className="min-h-screen bg-background">
-      {currentScreen === "splash" && <SplashScreen />}
       {currentScreen === "onboarding" && <OnboardingFlow onComplete={handleOnboardingComplete} />}
-      {currentScreen === "auth" && <AuthFlow onComplete={handleAuthComplete} />}
-      {currentScreen === "dashboard" && <Dashboard />}
+      {currentScreen === "auth" && !user && <AuthFlow onComplete={handleAuthComplete} />}
+      {(user || currentScreen === "dashboard") && <Dashboard />}
+      <Toaster position="top-right" />
     </main>
+  )
+}
+
+export default function Home() {
+  return (
+    <AuthProvider>
+      <MainContent />
+    </AuthProvider>
   )
 }
