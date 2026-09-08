@@ -3,7 +3,7 @@
 import { useEffect, useState, useCallback } from "react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
-import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { Badge } from "@/components/ui/badge"
 import {
@@ -35,7 +35,7 @@ export function Dashboard() {
   type TabType = "home" | "timer" | "tasks" | "gym" | "calendar" | "notifications" | "settings"
   const [activeTab, setActiveTab] = useState<TabType>("home")
 
-  // Remote state
+  // Remote / local state
   const [tasks, setTasks] = useState<TaskItem[]>([])
   const [stats, setStats] = useState<UserStats>({
     totalSessions: 0,
@@ -53,7 +53,6 @@ export function Dashboard() {
   // Timer state
   const [isTimerRunning, setIsTimerRunning] = useState(false)
   const [shortBreakMinutes] = useState(5)
-  const [longBreakMinutes] = useState(15)
   const [mode, setMode] = useState<"focus" | "break">("focus")
   const [timeLeft, setTimeLeft] = useState(25 * 60) // seconds
   const [currentTaskTitle, setCurrentTaskTitle] = useState("Focus Session")
@@ -76,12 +75,13 @@ export function Dashboard() {
   const [gymMuscle, setGymMuscle] = useState("")
 
   const formatTime = (seconds: number) => {
-    const mins = Math.floor(seconds / 60)
-    const secs = seconds % 60
+    const validSecs = Math.max(0, Math.floor(seconds || 0))
+    const mins = Math.floor(validSecs / 60)
+    const secs = validSecs % 60
     return `${mins.toString().padStart(2, "0")}:${secs.toString().padStart(2, "0")}`
   }
 
-  // Load backend data
+  // Load data
   const fetchData = useCallback(async () => {
     try {
       setIsLoading(true)
@@ -90,8 +90,17 @@ export function Dashboard() {
         apiClient.sessions.getStats(),
         apiClient.settings.getSettings(),
       ])
-      setTasks(fetchedTasks)
-      setStats(fetchedStats)
+      setTasks(fetchedTasks || [])
+      setStats(fetchedStats || {
+        totalSessions: 0,
+        totalFocusMinutes: 0,
+        totalFocusHours: "0.0h",
+        completedTasksCount: 0,
+        dayStreak: 0,
+        todaysSessionsCount: 0,
+        dailyGoalCount: 4,
+        dailyProgress: 0,
+      })
       setSettings(fetchedSettings)
 
       // Apply daily goal from onboarding
@@ -102,7 +111,7 @@ export function Dashboard() {
         }
       }
     } catch (err: any) {
-      toast.error("Failed to load data from server")
+      toast.error("Notice: Operating in offline mode")
     } finally {
       setIsLoading(false)
     }
@@ -134,6 +143,7 @@ export function Dashboard() {
       resetNewTaskForm()
       setNewTaskOpen(false)
       toast.success(isGymTask ? "Exercise added to tasks" : "Task created successfully")
+      fetchData()
     } catch (err: any) {
       toast.error(err.message || "Failed to create task")
     } finally {
@@ -173,8 +183,13 @@ export function Dashboard() {
       if (selectedTaskId === taskId) {
         setSelectedTaskId(null)
         setCurrentTaskTitle("Focus Session")
+        setSelectedTaskDuration(25)
+        if (!isTimerRunning) {
+          setTimeLeft(25 * 60)
+        }
       }
       toast.success("Task deleted")
+      fetchData()
     } catch (err: any) {
       toast.error("Failed to delete task")
     }
@@ -186,20 +201,21 @@ export function Dashboard() {
       setActiveTab("gym")
       return
     }
+    const dur = Math.max(1, task.durationMinutes || 25)
     setSelectedTaskId(task.id)
     setCurrentTaskTitle(task.title)
-    setSelectedTaskDuration(task.durationMinutes)
+    setSelectedTaskDuration(dur)
     setMode("focus")
     setIsTimerRunning(false)
-    setTimeLeft(task.durationMinutes * 60)
+    setTimeLeft(dur * 60)
     setActiveTab("timer")
   }
 
   const getFocusTotalSeconds = () => {
-    return selectedTaskDuration * 60
+    return Math.max(1, selectedTaskDuration) * 60
   }
 
-  // Audio & Notification Alerts
+  // Audio Alert
   const playBeep = () => {
     try {
       const AudioCtx = (window as any).AudioContext || (window as any).webkitAudioContext
@@ -262,13 +278,14 @@ export function Dashboard() {
   // Separate tasks and gym exercises
   const regularTasks = tasks.filter((t) => !t.isGymExercise)
   const gymTasks = tasks.filter((t) => t.isGymExercise)
+  const clampedProgress = Math.min(100, Math.max(0, stats.dailyProgress || 0))
 
   const renderHomeScreen = () => (
     <div className="space-y-6 page-transition">
       {/* Greeting */}
       <div className="text-center space-y-2">
         <h1 className="text-2xl font-bold text-foreground">
-          Good morning, {user?.username || user?.email.split("@")[0] || "Friend"}
+          Good morning, {user?.username || user?.email?.split("@")[0] || "Friend"}
         </h1>
         <p className="text-muted-foreground">Ready to boost your productivity?</p>
       </div>
@@ -305,13 +322,13 @@ export function Dashboard() {
                   strokeWidth="8"
                   fill="transparent"
                   strokeDasharray={`${2 * Math.PI * 40}`}
-                  strokeDashoffset={`${2 * Math.PI * 40 * (1 - (stats.dailyProgress || 0) / 100)}`}
+                  strokeDashoffset={`${2 * Math.PI * 40 * (1 - clampedProgress / 100)}`}
                   className="text-primary chart-animate"
                   strokeLinecap="round"
                 />
               </svg>
               <div className="absolute inset-0 flex items-center justify-center">
-                <span className="text-2xl font-bold text-foreground">{stats.dailyProgress || 0}%</span>
+                <span className="text-2xl font-bold text-foreground">{clampedProgress}%</span>
               </div>
             </div>
           </div>
@@ -347,7 +364,7 @@ export function Dashboard() {
             <>
               {regularTasks.slice(0, 3).map((task) => (
                 <div key={task.id} className="flex items-center space-x-3 p-3 glass-card rounded-lg">
-                  <div className={`w-3 h-3 rounded-full ${task.color}`}></div>
+                  <div className={`w-3 h-3 rounded-full ${task.color || "bg-primary"}`}></div>
                   <div className="flex-1">
                     <p
                       className={`font-medium ${task.completed ? "line-through text-muted-foreground" : "text-foreground"}`}
@@ -396,7 +413,14 @@ export function Dashboard() {
           <div className="text-center space-y-4">
             <div className="text-4xl font-bold text-foreground timer-pulse">{formatTime(timeLeft)}</div>
             <p className="text-muted-foreground">Current: {currentTaskTitle}</p>
-            <Button size="lg" className="w-full h-12" onClick={() => setActiveTab("timer")}>
+            <Button
+              size="lg"
+              className="w-full h-12"
+              onClick={() => {
+                setActiveTab("timer")
+                setIsTimerRunning(true)
+              }}
+            >
               <Play className="w-5 h-5 mr-2" />
               Start Focus Session
             </Button>
@@ -425,90 +449,95 @@ export function Dashboard() {
     </div>
   )
 
-  const renderTimerScreen = () => (
-    <div className="space-y-8 page-transition">
-      <div className="text-center space-y-2">
-        <h1 className="text-2xl font-bold text-foreground">{mode === "focus" ? "Focus" : "Break"} Session</h1>
-        <p className="text-muted-foreground">
-          {mode === "focus" ? currentTaskTitle : "Time to recharge"}
-        </p>
-      </div>
+  const renderTimerScreen = () => {
+    const totalSecs = mode === "focus" ? getFocusTotalSeconds() : shortBreakMinutes * 60
+    const ratio = Math.min(1, Math.max(0, timeLeft / Math.max(1, totalSecs)))
 
-      {/* Circular Timer */}
-      <div className="flex items-center justify-center">
-        <div className="relative w-64 h-64">
-          <svg className="w-64 h-64 transform -rotate-90 chart-animate" viewBox="0 0 100 100">
-            <circle
-              cx="50"
-              cy="50"
-              r="45"
-              stroke="currentColor"
-              strokeWidth="4"
-              fill="transparent"
-              className="text-muted"
-            />
-            <circle
-              cx="50"
-              cy="50"
-              r="45"
-              stroke="currentColor"
-              strokeWidth="4"
-              fill="transparent"
-              strokeDasharray={`${2 * Math.PI * 45}`}
-              strokeDashoffset={`${2 * Math.PI * 45 * (timeLeft / (mode === "focus" ? getFocusTotalSeconds() : shortBreakMinutes * 60))}`}
-              className={`text-primary chart-animate ${isTimerRunning ? "timer-pulse" : ""}`}
-              strokeLinecap="round"
-            />
-          </svg>
-          <div className="absolute inset-0 flex flex-col items-center justify-center">
-            <span className="text-4xl font-bold text-foreground">{formatTime(timeLeft)}</span>
-            <span className="text-muted-foreground text-sm">
-              {mode === "focus" ? `${selectedTaskDuration} min focus` : `break`}
-            </span>
+    return (
+      <div className="space-y-8 page-transition">
+        <div className="text-center space-y-2">
+          <h1 className="text-2xl font-bold text-foreground">{mode === "focus" ? "Focus" : "Break"} Session</h1>
+          <p className="text-muted-foreground">
+            {mode === "focus" ? currentTaskTitle : "Time to recharge"}
+          </p>
+        </div>
+
+        {/* Circular Timer */}
+        <div className="flex items-center justify-center">
+          <div className="relative w-64 h-64">
+            <svg className="w-64 h-64 transform -rotate-90 chart-animate" viewBox="0 0 100 100">
+              <circle
+                cx="50"
+                cy="50"
+                r="45"
+                stroke="currentColor"
+                strokeWidth="4"
+                fill="transparent"
+                className="text-muted"
+              />
+              <circle
+                cx="50"
+                cy="50"
+                r="45"
+                stroke="currentColor"
+                strokeWidth="4"
+                fill="transparent"
+                strokeDasharray={`${2 * Math.PI * 45}`}
+                strokeDashoffset={`${2 * Math.PI * 45 * ratio}`}
+                className={`text-primary chart-animate ${isTimerRunning ? "timer-pulse" : ""}`}
+                strokeLinecap="round"
+              />
+            </svg>
+            <div className="absolute inset-0 flex flex-col items-center justify-center">
+              <span className="text-4xl font-bold text-foreground">{formatTime(timeLeft)}</span>
+              <span className="text-muted-foreground text-sm">
+                {mode === "focus" ? `${selectedTaskDuration} min focus` : `break`}
+              </span>
+            </div>
           </div>
         </div>
-      </div>
 
-      {/* Timer Controls */}
-      <div className="flex justify-center space-x-4">
-        <Button size="lg" onClick={() => setIsTimerRunning(!isTimerRunning)} className="w-28 h-12 text-base">
-          {isTimerRunning ? <Pause className="w-5 h-5 mr-2" /> : <Play className="w-5 h-5 mr-2" />}
-          {isTimerRunning ? "Pause" : "Start"}
-        </Button>
-        <Button
-          variant="outline"
-          size="lg"
-          className="w-28 h-12 glass-card bg-transparent text-base"
-          onClick={() => {
-            setIsTimerRunning(false)
-            setTimeLeft(mode === "focus" ? getFocusTotalSeconds() : shortBreakMinutes * 60)
-          }}
-        >
-          Reset
-        </Button>
-      </div>
+        {/* Timer Controls */}
+        <div className="flex justify-center space-x-4">
+          <Button size="lg" onClick={() => setIsTimerRunning(!isTimerRunning)} className="w-28 h-12 text-base">
+            {isTimerRunning ? <Pause className="w-5 h-5 mr-2" /> : <Play className="w-5 h-5 mr-2" />}
+            {isTimerRunning ? "Pause" : "Start"}
+          </Button>
+          <Button
+            variant="outline"
+            size="lg"
+            className="w-28 h-12 glass-card bg-transparent text-base"
+            onClick={() => {
+              setIsTimerRunning(false)
+              setTimeLeft(mode === "focus" ? getFocusTotalSeconds() : shortBreakMinutes * 60)
+            }}
+          >
+            Reset
+          </Button>
+        </div>
 
-      {/* Session Info */}
-      <Card className="glass-card">
-        <CardContent className="pt-6">
-          <div className="grid grid-cols-3 gap-4 text-center">
-            <div>
-              <div className="text-2xl font-bold text-foreground">{stats.todaysSessionsCount}</div>
-              <div className="text-xs text-muted-foreground">Today's Done</div>
+        {/* Session Info */}
+        <Card className="glass-card">
+          <CardContent className="pt-6">
+            <div className="grid grid-cols-3 gap-4 text-center">
+              <div>
+                <div className="text-2xl font-bold text-foreground">{stats.todaysSessionsCount}</div>
+                <div className="text-xs text-muted-foreground">Today's Done</div>
+              </div>
+              <div>
+                <div className="text-2xl font-bold text-primary">{stats.dayStreak}d</div>
+                <div className="text-xs text-muted-foreground">Day Streak</div>
+              </div>
+              <div>
+                <div className="text-2xl font-bold text-muted-foreground">{stats.dailyGoalCount}</div>
+                <div className="text-xs text-muted-foreground">Daily Goal</div>
+              </div>
             </div>
-            <div>
-              <div className="text-2xl font-bold text-primary">{stats.dayStreak}d</div>
-              <div className="text-xs text-muted-foreground">Day Streak</div>
-            </div>
-            <div>
-              <div className="text-2xl font-bold text-muted-foreground">{stats.dailyGoalCount}</div>
-              <div className="text-xs text-muted-foreground">Daily Goal</div>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
-    </div>
-  )
+          </CardContent>
+        </Card>
+      </div>
+    )
+  }
 
   const renderTasksScreen = () => {
     const focusTasks = regularTasks.filter((t) => !t.isGymExercise)
@@ -549,7 +578,7 @@ export function Dashboard() {
               <Card key={task.id} className="glass-card">
                 <CardContent className="p-4">
                   <div className="flex items-center space-x-3">
-                    <div className={`w-4 h-4 rounded-full ${task.color}`}></div>
+                    <div className={`w-4 h-4 rounded-full ${task.color || "bg-primary"}`}></div>
                     <div className="flex-1">
                       <p
                         className={`font-medium ${task.completed ? "line-through text-muted-foreground" : "text-foreground"}`}
@@ -723,6 +752,9 @@ export function Dashboard() {
         <DialogContent className="glass-card" showCloseButton>
           <DialogHeader>
             <DialogTitle>{isGymTask ? "Add Exercise to Tasks" : "Add New Task"}</DialogTitle>
+            <DialogDescription>
+              {isGymTask ? "Add a gym exercise to your task list." : "Create a new task for your focus sessions."}
+            </DialogDescription>
           </DialogHeader>
           <div className="space-y-4 py-2">
             {/* Gym mode toggle in dialog */}
