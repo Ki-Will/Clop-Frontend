@@ -26,6 +26,19 @@ import {
   Trophy,
   BarChart3,
 } from "lucide-react"
+import {
+  LineChart,
+  Line,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+  ResponsiveContainer,
+  AreaChart,
+  Area,
+  BarChart,
+  Bar,
+} from "recharts"
 import { apiClient, GymExercise, GymStats, GymSessionLog, UserSettingsData, ExerciseProgression, ProgressionExerciseStats, PersonalRecord } from "@/lib/api-client"
 import { toast } from "sonner"
 
@@ -737,6 +750,54 @@ export function GymMode({ settings }: GymModeProps) {
                     </div>
                   </div>
 
+                  {/* Personal Records Chart */}
+                  <div className="space-y-2">
+                    <h4 className="text-sm font-medium text-foreground">Personal Records</h4>
+                    <div className="glass-card p-3 rounded-lg">
+                      <ResponsiveContainer width="100%" height={120}>
+                        <BarChart
+                          layout="vertical"
+                          data={[
+                            { name: 'Max Weight', value: progressionData.personalRecords.maxWeight, unit: 'kg' },
+                            { name: 'Max Reps', value: progressionData.personalRecords.maxReps, unit: 'reps' },
+                            { name: 'Max Volume', value: Math.min(progressionData.personalRecords.maxVolume, 10000), unit: 'kg' },
+                          ]}
+                          margin={{ top: 5, right: 30, left: 80, bottom: 5 }}
+                        >
+                          <CartesianGrid strokeDasharray="3 3" className="opacity-30" />
+                          <XAxis type="number" tick={{ fontSize: 10 }} stroke="currentColor" className="text-muted-foreground" />
+                          <YAxis 
+                            type="category" 
+                            dataKey="name" 
+                            tick={{ fontSize: 10 }} 
+                            stroke="currentColor"
+                            className="text-muted-foreground"
+                            width={75}
+                          />
+                          <Tooltip 
+                            contentStyle={{ 
+                              backgroundColor: 'hsl(var(--card))', 
+                              border: '1px solid hsl(var(--border))',
+                              borderRadius: '8px',
+                              color: 'hsl(var(--foreground))'
+                            }}
+                            formatter={(value, name) => [
+                              name === 'Max Weight' ? `${value}kg` :
+                              name === 'Max Reps' ? `${value} reps` :
+                              `${value}kg`,
+                              name
+                            ]}
+                          />
+                          <Bar 
+                            dataKey="value" 
+                            fill="hsl(var(--primary))" 
+                            radius={[0, 4, 4, 0]}
+                          />
+                        </BarChart>
+                      </ResponsiveContainer>
+                    </div>
+                  </div>
+
                   {/* Trends */}
                   <div className="space-y-2">
                     <h4 className="text-sm font-medium text-foreground">Recent Trends</h4>
@@ -780,56 +841,152 @@ export function GymMode({ settings }: GymModeProps) {
                     </div>
                   </div>
 
-                  {/* Simple Progression Chart (weight over time) */}
+                  {/* Weight Progression Chart */}
                   {progressionData.progressionData.length > 1 && (
                     <div className="space-y-2">
                       <h4 className="text-sm font-medium text-foreground">Weight Progression</h4>
                       <div className="glass-card p-3 rounded-lg">
-                        <div className="flex items-end space-x-1 h-32">
-                          {progressionData.progressionData.slice(-10).map((point, idx) => {
-                            const maxWeight = Math.max(...progressionData.progressionData.map(p => p.maxWeight))
-                            const height = maxWeight > 0 ? (point.maxWeight / maxWeight) * 100 : 0
-                            return (
-                              <div key={idx} className="flex-1 flex flex-col items-center">
-                                <div className="text-xs text-muted-foreground mb-1">{point.maxWeight}</div>
-                                <div
-                                  className="w-full bg-primary/20 rounded-t"
-                                  style={{ height: `${Math.max(height, 5)}%` }}
-                                />
-                                <div className="text-xs text-muted-foreground mt-1 truncate w-full text-center">
-                                  {new Date(point.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
-                                </div>
-                              </div>
-                            )
-                          })}
-                        </div>
+                        <ResponsiveContainer width="100%" height={200}>
+                          <LineChart
+                            data={progressionData.progressionData.slice(-14).map(p => ({
+                              date: new Date(p.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
+                              weight: p.maxWeight,
+                              avgWeight: p.avgWeight,
+                            }))}
+                          >
+                            <CartesianGrid strokeDasharray="3 3" className="opacity-30" />
+                            <XAxis 
+                              dataKey="date" 
+                              tick={{ fontSize: 10 }} 
+                              stroke="currentColor"
+                              className="text-muted-foreground"
+                            />
+                            <YAxis 
+                              tick={{ fontSize: 10 }} 
+                              stroke="currentColor"
+                              className="text-muted-foreground"
+                            />
+                            <Tooltip 
+                              contentStyle={{ 
+                                backgroundColor: 'hsl(var(--card))', 
+                                border: '1px solid hsl(var(--border))',
+                                borderRadius: '8px',
+                                color: 'hsl(var(--foreground))'
+                              }}
+                            />
+                            <Line 
+                              type="monotone" 
+                              dataKey="weight" 
+                              stroke="hsl(var(--primary))" 
+                              strokeWidth={2}
+                              dot={{ fill: 'hsl(var(--primary))', strokeWidth: 2, r: 4 }}
+                              activeDot={{ r: 6 }}
+                              name="Max Weight (kg)"
+                            />
+                            <Line 
+                              type="monotone" 
+                              dataKey="avgWeight" 
+                              stroke="hsl(var(--accent))" 
+                              strokeWidth={2}
+                              strokeDasharray="5 5"
+                              dot={false}
+                              name="Avg Weight (kg)"
+                            />
+                          </LineChart>
+                        </ResponsiveContainer>
                       </div>
                     </div>
                   )}
 
-                  {/* Volume Progression */}
+                  {/* Volume Progression Chart */}
                   {progressionData.progressionData.length > 1 && (
                     <div className="space-y-2">
                       <h4 className="text-sm font-medium text-foreground">Volume Progression</h4>
                       <div className="glass-card p-3 rounded-lg">
-                        <div className="flex items-end space-x-1 h-32">
-                          {progressionData.progressionData.slice(-10).map((point, idx) => {
-                            const maxVolume = Math.max(...progressionData.progressionData.map(p => p.totalVolume))
-                            const height = maxVolume > 0 ? (point.totalVolume / maxVolume) * 100 : 0
-                            return (
-                              <div key={idx} className="flex-1 flex flex-col items-center">
-                                <div className="text-xs text-muted-foreground mb-1">{point.totalVolume}</div>
-                                <div
-                                  className="w-full bg-accent/20 rounded-t"
-                                  style={{ height: `${Math.max(height, 5)}%` }}
-                                />
-                                <div className="text-xs text-muted-foreground mt-1 truncate w-full text-center">
-                                  {new Date(point.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
-                                </div>
-                              </div>
-                            )
-                          })}
-                        </div>
+                        <ResponsiveContainer width="100%" height={200}>
+                          <AreaChart
+                            data={progressionData.progressionData.slice(-14).map(p => ({
+                              date: new Date(p.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
+                              volume: p.totalVolume,
+                              reps: p.totalReps,
+                            }))}
+                          >
+                            <CartesianGrid strokeDasharray="3 3" className="opacity-30" />
+                            <XAxis 
+                              dataKey="date" 
+                              tick={{ fontSize: 10 }} 
+                              stroke="currentColor"
+                              className="text-muted-foreground"
+                            />
+                            <YAxis 
+                              tick={{ fontSize: 10 }} 
+                              stroke="currentColor"
+                              className="text-muted-foreground"
+                            />
+                            <Tooltip 
+                              contentStyle={{ 
+                                backgroundColor: 'hsl(var(--card))', 
+                                border: '1px solid hsl(var(--border))',
+                                borderRadius: '8px',
+                                color: 'hsl(var(--foreground))'
+                              }}
+                            />
+                            <Area 
+                              type="monotone" 
+                              dataKey="volume" 
+                              stroke="hsl(var(--accent))" 
+                              fill="hsl(var(--accent))" 
+                              fillOpacity={0.2}
+                              strokeWidth={2}
+                              name="Volume (kg)"
+                            />
+                          </AreaChart>
+                        </ResponsiveContainer>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Reps Progression Chart */}
+                  {progressionData.progressionData.length > 1 && (
+                    <div className="space-y-2">
+                      <h4 className="text-sm font-medium text-foreground">Reps Progression</h4>
+                      <div className="glass-card p-3 rounded-lg">
+                        <ResponsiveContainer width="100%" height={150}>
+                          <BarChart
+                            data={progressionData.progressionData.slice(-10).map(p => ({
+                              date: new Date(p.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
+                              reps: p.totalReps,
+                              sets: p.totalSets,
+                            }))}
+                          >
+                            <CartesianGrid strokeDasharray="3 3" className="opacity-30" />
+                            <XAxis 
+                              dataKey="date" 
+                              tick={{ fontSize: 10 }} 
+                              stroke="currentColor"
+                              className="text-muted-foreground"
+                            />
+                            <YAxis 
+                              tick={{ fontSize: 10 }} 
+                              stroke="currentColor"
+                              className="text-muted-foreground"
+                            />
+                            <Tooltip 
+                              contentStyle={{ 
+                                backgroundColor: 'hsl(var(--card))', 
+                                border: '1px solid hsl(var(--border))',
+                                borderRadius: '8px',
+                                color: 'hsl(var(--foreground))'
+                              }}
+                            />
+                            <Bar 
+                              dataKey="reps" 
+                              fill="hsl(var(--primary))" 
+                              radius={[4, 4, 0, 0]}
+                              name="Total Reps"
+                            />
+                          </BarChart>
+                        </ResponsiveContainer>
                       </div>
                     </div>
                   )}
