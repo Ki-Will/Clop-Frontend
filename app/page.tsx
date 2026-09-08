@@ -13,6 +13,8 @@ function MainContent() {
   const [currentScreen, setCurrentScreen] = useState<"splash" | "onboarding" | "auth" | "dashboard">("splash")
 
   useEffect(() => {
+    if (loading) return
+
     const timer = setTimeout(() => {
       if (user) {
         setCurrentScreen("dashboard")
@@ -23,7 +25,7 @@ function MainContent() {
     }, 1200)
 
     return () => clearTimeout(timer)
-  }, [user])
+  }, [user, loading])
 
   const handleOnboardingComplete = () => {
     if (typeof window !== "undefined") {
