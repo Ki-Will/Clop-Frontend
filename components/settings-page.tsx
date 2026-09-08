@@ -6,10 +6,25 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Switch } from "@/components/ui/switch"
 import { Badge } from "@/components/ui/badge"
 import { Input } from "@/components/ui/input"
-import { Bell, Palette, Shield, Download, Trash2, User, Settings, ChevronRight, LogOut, Loader2 } from "lucide-react"
+import {
+  Bell,
+  Palette,
+  Shield,
+  Download,
+  Trash2,
+  User,
+  Settings,
+  ChevronRight,
+  LogOut,
+  Loader2,
+  Dumbbell,
+  Clock,
+  Plus,
+  X,
+} from "lucide-react"
 import { ThemeToggle } from "@/components/theme-toggle"
 import { useAuth } from "./auth-context"
-import { apiClient, UserSettingsData, UserStats } from "@/lib/api-client"
+import { apiClient, UserSettingsData, UserStats, GymExercise } from "@/lib/api-client"
 import { toast } from "sonner"
 
 interface SettingsPageProps {
@@ -25,6 +40,10 @@ export function SettingsPage({ onBack }: SettingsPageProps) {
     notifications: true,
     soundEnabled: true,
     vibrationEnabled: false,
+    gymMode: false,
+    restTimerSeconds: 60,
+    autoRestTimer: true,
+    weightUnit: "kg",
   })
 
   const [stats, setStats] = useState<UserStats>({
@@ -42,6 +61,11 @@ export function SettingsPage({ onBack }: SettingsPageProps) {
   const [isSavingName, setIsSavingName] = useState(false)
   const [isExporting, setIsExporting] = useState(false)
   const [isClearing, setIsClearing] = useState(false)
+  const [gymExercises, setGymExercises] = useState<GymExercise[]>([])
+  const [newRestTime, setNewRestTime] = useState(60)
+  const [showExerciseAdd, setShowExerciseAdd] = useState(false)
+  const [newExName, setNewExName] = useState("")
+  const [newExMuscle, setNewExMuscle] = useState("")
 
   useEffect(() => {
     if (user?.username) {
@@ -52,22 +76,55 @@ export function SettingsPage({ onBack }: SettingsPageProps) {
   useEffect(() => {
     apiClient.settings
       .getSettings()
-      .then((data) => setSettings(data))
+      .then((data) => {
+        setSettings(data)
+        setNewRestTime(data.restTimerSeconds)
+      })
       .catch(() => {})
 
     apiClient.sessions
       .getStats()
       .then((data) => setStats(data))
       .catch(() => {})
+
+    apiClient.gym
+      .getExercises()
+      .then((data) => setGymExercises(data))
+      .catch(() => {})
   }, [])
 
-  const handleSettingToggle = async (key: "notifications" | "soundEnabled" | "vibrationEnabled", value: boolean) => {
+  const handleSettingToggle = async (
+    key: "notifications" | "soundEnabled" | "vibrationEnabled" | "gymMode" | "autoRestTimer",
+    value: boolean
+  ) => {
     setSettings((prev) => ({ ...prev, [key]: value }))
     try {
       await apiClient.settings.updateSettings({ [key]: value })
       toast.success("Settings saved")
     } catch {
       toast.error("Failed to update settings")
+    }
+  }
+
+  const handleRestTimerChange = async (value: number) => {
+    const clamped = Math.max(10, Math.min(300, value))
+    setNewRestTime(clamped)
+    setSettings((prev) => ({ ...prev, restTimerSeconds: clamped }))
+    try {
+      await apiClient.settings.updateSettings({ restTimerSeconds: clamped })
+      toast.success("Rest timer updated")
+    } catch {
+      toast.error("Failed to update rest timer")
+    }
+  }
+
+  const handleWeightUnitChange = async (unit: string) => {
+    setSettings((prev) => ({ ...prev, weightUnit: unit }))
+    try {
+      await apiClient.settings.updateSettings({ weightUnit: unit })
+      toast.success("Weight unit updated")
+    } catch {
+      toast.error("Failed to update weight unit")
     }
   }
 
@@ -118,6 +175,33 @@ export function SettingsPage({ onBack }: SettingsPageProps) {
       toast.error("Failed to clear user data")
     } finally {
       setIsClearing(false)
+    }
+  }
+
+  const addQuickExercise = async () => {
+    if (!newExName.trim()) return
+    try {
+      const created = await apiClient.gym.createExercise({
+        name: newExName.trim(),
+        muscleGroup: newExMuscle.trim() || "General",
+      })
+      setGymExercises((prev) => [created, ...prev])
+      setNewExName("")
+      setNewExMuscle("")
+      setShowExerciseAdd(false)
+      toast.success("Exercise added")
+    } catch {
+      toast.error("Failed to add exercise")
+    }
+  }
+
+  const deleteQuickExercise = async (id: number) => {
+    try {
+      await apiClient.gym.deleteExercise(id)
+      setGymExercises((prev) => prev.filter((e) => e.id !== id))
+      toast.success("Exercise removed")
+    } catch {
+      toast.error("Failed to delete exercise")
     }
   }
 
@@ -214,6 +298,143 @@ export function SettingsPage({ onBack }: SettingsPageProps) {
               onCheckedChange={(val) => handleSettingToggle("soundEnabled", val)}
             />
           </div>
+        </CardContent>
+      </Card>
+
+      {/* Gym Mode Settings */}
+      <Card className="glass-card">
+        <CardHeader>
+          <CardTitle className="flex items-center space-x-2">
+            <Dumbbell className="w-5 h-5 text-primary" />
+            <span>Gym Mode</span>
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-6">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="font-medium text-foreground">Enable Gym Mode</p>
+              <p className="text-sm text-muted-foreground">Track exercises, sets, reps, and rest timers</p>
+            </div>
+            <Switch
+              checked={settings.gymMode}
+              onCheckedChange={(val) => handleSettingToggle("gymMode", val)}
+            />
+          </div>
+
+          {settings.gymMode && (
+            <>
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="font-medium text-foreground">Auto Rest Timer</p>
+                  <p className="text-sm text-muted-foreground">Start rest timer automatically after each set</p>
+                </div>
+                <Switch
+                  checked={settings.autoRestTimer}
+                  onCheckedChange={(val) => handleSettingToggle("autoRestTimer", val)}
+                />
+              </div>
+
+              <div className="space-y-2">
+                <label className="text-sm font-medium text-foreground">Rest Timer Duration (seconds)</label>
+                <div className="flex items-center space-x-3">
+                  <Input
+                    type="number"
+                    min={10}
+                    max={300}
+                    value={newRestTime}
+                    onChange={(e) => handleRestTimerChange(parseInt(e.target.value) || 60)}
+                    className="w-24"
+                  />
+                  <span className="text-sm text-muted-foreground">
+                    {Math.floor(newRestTime / 60)}:{(newRestTime % 60).toString().padStart(2, "0")}
+                  </span>
+                </div>
+                <div className="flex space-x-2">
+                  {[30, 60, 90, 120].map((sec) => (
+                    <Button
+                      key={sec}
+                      size="sm"
+                      variant={newRestTime === sec ? "default" : "outline"}
+                      onClick={() => handleRestTimerChange(sec)}
+                      className="text-xs"
+                    >
+                      {sec}s
+                    </Button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                <label className="text-sm font-medium text-foreground">Weight Unit</label>
+                <div className="flex space-x-2">
+                  {["kg", "lbs"].map((unit) => (
+                    <Button
+                      key={unit}
+                      size="sm"
+                      variant={settings.weightUnit === unit ? "default" : "outline"}
+                      onClick={() => handleWeightUnitChange(unit)}
+                    >
+                      {unit}
+                    </Button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Quick Exercise Library */}
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <label className="text-sm font-medium text-foreground">Exercise Library</label>
+                  <Button size="sm" variant="outline" onClick={() => setShowExerciseAdd(!showExerciseAdd)}>
+                    <Plus className="w-3 h-3 mr-1" />
+                    Add
+                  </Button>
+                </div>
+
+                {showExerciseAdd && (
+                  <div className="flex space-x-2">
+                    <Input
+                      placeholder="Exercise name"
+                      value={newExName}
+                      onChange={(e) => setNewExName(e.target.value)}
+                      className="flex-1"
+                    />
+                    <Input
+                      placeholder="Muscle group"
+                      value={newExMuscle}
+                      onChange={(e) => setNewExMuscle(e.target.value)}
+                      className="w-28"
+                    />
+                    <Button size="sm" onClick={addQuickExercise} disabled={!newExName.trim()}>
+                      Add
+                    </Button>
+                  </div>
+                )}
+
+                {gymExercises.length > 0 ? (
+                  <div className="space-y-1">
+                    {gymExercises.map((ex) => (
+                      <div key={ex.id} className="flex items-center justify-between p-2 glass-card rounded text-sm">
+                        <div className="flex items-center space-x-2">
+                          <span className="text-foreground">{ex.name}</span>
+                          <Badge variant="secondary" className="text-xs">{ex.muscleGroup}</Badge>
+                        </div>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          className="p-1 text-destructive hover:bg-destructive/10"
+                          onClick={() => deleteQuickExercise(ex.id)}
+                        >
+                          <X className="w-3 h-3" />
+                        </Button>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-xs text-muted-foreground">No exercises in library yet</p>
+                )}
+              </div>
+            </>
+          )}
         </CardContent>
       </Card>
 
