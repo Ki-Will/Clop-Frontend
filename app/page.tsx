@@ -20,7 +20,7 @@ function MainContent() {
         const hasSeenOnboarding = typeof window !== "undefined" ? localStorage.getItem("has_seen_onboarding") : null
         setCurrentScreen(hasSeenOnboarding ? "auth" : "onboarding")
       }
-    }, 1500)
+    }, 1200)
 
     return () => clearTimeout(timer)
   }, [user])
@@ -48,7 +48,7 @@ function MainContent() {
     <main className="min-h-screen bg-background">
       {currentScreen === "onboarding" && <OnboardingFlow onComplete={handleOnboardingComplete} />}
       {currentScreen === "auth" && !user && <AuthFlow onComplete={handleAuthComplete} />}
-      {(user || currentScreen === "dashboard") && <Dashboard />}
+      {currentScreen === "dashboard" && <Dashboard />}
       <Toaster position="top-right" />
     </main>
   )
