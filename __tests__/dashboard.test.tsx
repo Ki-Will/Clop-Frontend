@@ -19,7 +19,7 @@ describe('Dashboard Component Tests', () => {
     })
 
     expect(screen.getByText('Clop')).toBeDefined()
-    expect(screen.getByText('Daily Goal Progress')).toBeDefined()
+    expect(screen.getByText('Daily Goal')).toBeDefined()
   })
 
   it('allows adding a new task', async () => {

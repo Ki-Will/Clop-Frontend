@@ -13,6 +13,7 @@ import {
   Bell,
   Calendar,
   CheckCircle2,
+  ChevronRight,
   Clock,
   Target,
   Home,
@@ -26,12 +27,12 @@ import {
 import { ThemeToggle } from "@/components/theme-toggle"
 import { SettingsPage } from "@/components/settings-page"
 import { GymMode } from "@/components/gym-mode"
-import { apiClient, TaskItem, UserStats, UserSettingsData } from "@/lib/api-client"
+import { apiClient, ApiError, TaskItem, UserStats, UserSettingsData } from "@/lib/api-client"
 import { useAuth } from "./auth-context"
 import { toast } from "sonner"
 
 export function Dashboard() {
-  const { user } = useAuth()
+  const { user, logout } = useAuth()
   type TabType = "home" | "timer" | "tasks" | "gym" | "calendar" | "notifications" | "settings"
   const [activeTab, setActiveTab] = useState<TabType>("home")
 
@@ -85,23 +86,48 @@ export function Dashboard() {
   const fetchData = useCallback(async () => {
     try {
       setIsLoading(true)
-      const [fetchedTasks, fetchedStats, fetchedSettings] = await Promise.all([
+      const [tasksRes, statsRes, settingsRes] = await Promise.allSettled([
         apiClient.tasks.getTasks(),
         apiClient.sessions.getStats(),
         apiClient.settings.getSettings(),
       ])
-      setTasks(fetchedTasks || [])
-      setStats(fetchedStats || {
-        totalSessions: 0,
-        totalFocusMinutes: 0,
-        totalFocusHours: "0.0h",
-        completedTasksCount: 0,
-        dayStreak: 0,
-        todaysSessionsCount: 0,
-        dailyGoalCount: 4,
-        dailyProgress: 0,
-      })
-      setSettings(fetchedSettings)
+
+      // Apply whatever succeeded — one failing endpoint shouldn't blank the dashboard
+      if (tasksRes.status === "fulfilled") {
+        setTasks(tasksRes.value || [])
+      }
+      if (statsRes.status === "fulfilled") {
+        setStats(statsRes.value || {
+          totalSessions: 0,
+          totalFocusMinutes: 0,
+          totalFocusHours: "0.0h",
+          completedTasksCount: 0,
+          dayStreak: 0,
+          todaysSessionsCount: 0,
+          dailyGoalCount: 4,
+          dailyProgress: 0,
+        })
+      }
+      if (settingsRes.status === "fulfilled") {
+        setSettings(settingsRes.value)
+      }
+
+      const failures = [tasksRes, statsRes, settingsRes].filter(
+        (r): r is PromiseRejectedResult => r.status === "rejected",
+      )
+      if (failures.length > 0) {
+        const err = failures[0].reason
+        console.error("Dashboard failed to load some data:", err)
+        if (err instanceof ApiError && err.code === "UNAUTHORIZED") {
+          // Token invalid/expired — end the session instead of misreporting it
+          toast.error("Your session has expired. Please sign in again.")
+          logout()
+        } else if (failures.length === 3) {
+          toast.error(err instanceof ApiError ? err.message : "Failed to load your data")
+        } else {
+          toast.error("Some data couldn't be loaded — check your connection")
+        }
+      }
 
       // Apply daily goal from onboarding
       if (typeof window !== "undefined") {
@@ -110,12 +136,14 @@ export function Dashboard() {
           setStats((prev) => ({ ...prev, dailyGoalCount: parseInt(savedGoal) || prev.dailyGoalCount }))
         }
       }
-    } catch (err: any) {
-      toast.error("Notice: Operating in offline mode")
+    } catch (err) {
+      // Unexpected failure outside the API layer (e.g. localStorage access)
+      console.error("Unexpected error loading dashboard:", err)
+      toast.error("Something went wrong loading the dashboard")
     } finally {
       setIsLoading(false)
     }
-  }, [])
+  }, [logout])
 
   useEffect(() => {
     fetchData()
@@ -145,6 +173,7 @@ export function Dashboard() {
       toast.success(isGymTask ? "Exercise added to tasks" : "Task created successfully")
       fetchData()
     } catch (err: any) {
+      console.error("Failed to create task:", err)
       toast.error(err.message || "Failed to create task")
     } finally {
       setIsCreatingTask(false)
@@ -172,6 +201,7 @@ export function Dashboard() {
       fetchData()
       toast.success(updated.completed ? "Task completed!" : "Task marked incomplete")
     } catch (err: any) {
+      console.error("Failed to update task:", err)
       toast.error("Failed to update task")
     }
   }
@@ -191,6 +221,7 @@ export function Dashboard() {
       toast.success("Task deleted")
       fetchData()
     } catch (err: any) {
+      console.error("Failed to delete task:", err)
       toast.error("Failed to delete task")
     }
   }
@@ -233,7 +264,10 @@ export function Dashboard() {
         o.stop()
         ctx.close()
       }, 500)
-    } catch {}
+    } catch (err) {
+      // Audio is best-effort (autoplay policies may block it) — never break the timer
+      console.warn("Audio alert unavailable:", err)
+    }
   }
 
   const handleSessionComplete = async () => {
@@ -280,257 +314,402 @@ export function Dashboard() {
   const gymTasks = tasks.filter((t) => t.isGymExercise)
   const clampedProgress = Math.min(100, Math.max(0, stats.dailyProgress || 0))
 
-  const renderHomeScreen = () => (
-    <div className="space-y-6 page-transition">
-      {/* Greeting */}
-      <div className="text-center space-y-2">
-        <h1 className="text-2xl font-bold text-foreground">
-          Good morning, {user?.username || user?.email?.split("@")[0] || "Friend"}
-        </h1>
-        <p className="text-muted-foreground">Ready to boost your productivity?</p>
-      </div>
+  const renderHomeScreen = () => {
+    // Time-aware greeting
+    const hour = new Date().getHours()
+    const greeting =
+      hour < 12 ? "Good morning" : hour < 17 ? "Good afternoon" : "Good evening"
+    const name = user?.username || user?.email?.split("@")[0] || "Friend"
 
-      {/* Daily Progress */}
-      <Card className="glass-card">
-        <CardHeader className="flex flex-row items-center justify-between pb-2">
-          <CardTitle className="flex items-center space-x-2">
-            <Target className="w-5 h-5 text-primary" />
-            <span>Daily Goal Progress</span>
-          </CardTitle>
-          <Button variant="ghost" size="sm" onClick={fetchData} className="h-8 w-8 p-0">
-            <RefreshCw className={`w-4 h-4 ${isLoading ? "animate-spin" : ""}`} />
-          </Button>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="flex items-center justify-center">
-            <div className="relative w-32 h-32">
-              <svg className="w-32 h-32 transform -rotate-90 chart-animate" viewBox="0 0 100 100">
-                <circle
-                  cx="50"
-                  cy="50"
-                  r="40"
-                  stroke="currentColor"
-                  strokeWidth="8"
-                  fill="transparent"
-                  className="text-muted"
-                />
-                <circle
-                  cx="50"
-                  cy="50"
-                  r="40"
-                  stroke="currentColor"
-                  strokeWidth="8"
-                  fill="transparent"
-                  strokeDasharray={`${2 * Math.PI * 40}`}
-                  strokeDashoffset={`${2 * Math.PI * 40 * (1 - clampedProgress / 100)}`}
-                  className="text-primary chart-animate"
-                  strokeLinecap="round"
-                />
-              </svg>
-              <div className="absolute inset-0 flex items-center justify-center">
-                <span className="text-2xl font-bold text-foreground">{clampedProgress}%</span>
-              </div>
-            </div>
+    return (
+      <div className="space-y-5 page-transition">
+        {/* Greeting + streak badge */}
+        <div className="flex items-start justify-between">
+          <div className="space-y-0.5">
+            <p className="text-xs font-semibold tracking-widest uppercase text-muted-foreground">
+              {greeting}
+            </p>
+            <h1 className="text-2xl font-bold text-foreground leading-tight">{name}</h1>
           </div>
-          <p className="text-center text-muted-foreground">
-            {stats.todaysSessionsCount || 0} of {stats.dailyGoalCount || 4} Pomodoros completed today
-          </p>
-        </CardContent>
-      </Card>
+          {stats.dayStreak > 0 && (
+            <div className="flex flex-col items-center gap-0.5">
+              <span className="text-2xl leading-none">🔥</span>
+              <span className="text-xs font-bold text-primary">
+                {stats.dayStreak}d
+              </span>
+            </div>
+          )}
+        </div>
 
-      {/* Today's Tasks */}
-      <Card className="glass-card">
-        <CardHeader className="flex flex-row items-center justify-between">
-          <CardTitle>Today's Tasks</CardTitle>
-          <Button size="sm" onClick={() => setNewTaskOpen(true)}>
-            <Plus className="w-4 h-4 mr-1" />
-            Add
-          </Button>
-        </CardHeader>
-        <CardContent className="space-y-3">
-          {isLoading ? (
-            <div className="flex items-center justify-center py-6">
-              <Loader2 className="w-6 h-6 animate-spin text-primary" />
-            </div>
-          ) : regularTasks.length === 0 && gymTasks.length === 0 ? (
-            <div className="text-center py-6 space-y-3">
-              <ListTodo className="w-10 h-10 text-muted-foreground mx-auto opacity-50" />
-              <p className="text-muted-foreground">No tasks created yet</p>
-              <Button size="sm" variant="outline" onClick={() => setNewTaskOpen(true)}>
-                Create your first task
-              </Button>
-            </div>
-          ) : (
-            <>
-              {regularTasks.slice(0, 3).map((task) => (
-                <div key={task.id} className="flex items-center space-x-3 p-3 glass-card rounded-lg">
-                  <div className={`w-3 h-3 rounded-full ${task.color || "bg-primary"}`}></div>
-                  <div className="flex-1">
-                    <p
-                      className={`font-medium ${task.completed ? "line-through text-muted-foreground" : "text-foreground"}`}
-                    >
-                      {task.title}
-                    </p>
-                    <p className="text-xs text-muted-foreground">{task.category}</p>
-                  </div>
-                  {task.completed && <CheckCircle2 className="w-5 h-5 text-accent" />}
+        {/* Daily Progress ring — large, centred, animated fill */}
+        <Card className="glass-card overflow-hidden">
+          <CardContent className="pt-6 pb-5">
+            <div className="flex items-center gap-5">
+              {/* Ring */}
+              <div className="relative w-28 h-28 shrink-0">
+                <svg
+                  className="w-28 h-28 -rotate-90"
+                  viewBox="0 0 100 100"
+                >
+                  {/* Track */}
+                  <circle
+                    cx="50" cy="50" r="40"
+                    stroke="currentColor"
+                    strokeWidth="9"
+                    fill="transparent"
+                    className="text-muted/30"
+                  />
+                  {/* Progress arc */}
+                  <circle
+                    cx="50" cy="50" r="40"
+                    stroke="currentColor"
+                    strokeWidth="9"
+                    fill="transparent"
+                    strokeDasharray={`${2 * Math.PI * 40}`}
+                    strokeDashoffset={`${2 * Math.PI * 40 * (1 - clampedProgress / 100)}`}
+                    className="text-primary chart-animate"
+                    strokeLinecap="round"
+                  />
+                </svg>
+                <div className="absolute inset-0 flex flex-col items-center justify-center gap-0">
+                  <span className="text-xl font-bold text-foreground leading-none">
+                    {clampedProgress}%
+                  </span>
+                  <span className="text-[10px] text-muted-foreground mt-0.5">done</span>
                 </div>
-              ))}
-              {gymTasks.length > 0 && (
-                <div className="border-t border-border pt-3 mt-3">
-                  <p className="text-xs font-medium text-muted-foreground mb-2 flex items-center">
-                    <Dumbbell className="w-3 h-3 mr-1" />
-                    GYM EXERCISES
+              </div>
+
+              {/* Text summary */}
+              <div className="flex-1 space-y-2">
+                <div>
+                  <p className="text-sm font-semibold text-foreground">Daily Goal</p>
+                  <p className="text-xs text-muted-foreground">
+                    {stats.todaysSessionsCount} of {stats.dailyGoalCount} Pomodoros
                   </p>
-                  {gymTasks.slice(0, 2).map((task) => (
-                    <div key={task.id} className="flex items-center space-x-3 p-2 rounded-lg">
-                      <Dumbbell className="w-4 h-4 text-primary" />
-                      <div className="flex-1">
-                        <p className="text-sm font-medium text-foreground">{task.title}</p>
-                        <p className="text-xs text-muted-foreground">
-                          {task.setsPlanned}×{task.repsPerSet}
-                          {task.weightKg ? ` @ ${task.weightKg}kg` : ""}
-                          {task.muscleGroup ? ` · ${task.muscleGroup}` : ""}
-                        </p>
-                      </div>
-                    </div>
+                </div>
+                {/* Mini session pips */}
+                <div className="flex gap-1.5 flex-wrap">
+                  {Array.from({ length: stats.dailyGoalCount }).map((_, i) => (
+                    <div
+                      key={i}
+                      className={`w-2.5 h-2.5 rounded-full transition-colors duration-300 ${
+                        i < stats.todaysSessionsCount
+                          ? "bg-primary"
+                          : "bg-muted/30"
+                      }`}
+                    />
                   ))}
                 </div>
-              )}
-            </>
-          )}
-          {regularTasks.length > 3 && (
-            <Button variant="outline" className="w-full glass-card bg-transparent" onClick={() => setActiveTab("tasks")}>
-              View All {regularTasks.length} Tasks
-            </Button>
-          )}
-        </CardContent>
-      </Card>
-
-      {/* Quick Start Timer */}
-      <Card className="glass-card">
-        <CardContent className="pt-6">
-          <div className="text-center space-y-4">
-            <div className="text-4xl font-bold text-foreground timer-pulse">{formatTime(timeLeft)}</div>
-            <p className="text-muted-foreground">Current: {currentTaskTitle}</p>
-            <Button
-              size="lg"
-              className="w-full h-12"
-              onClick={() => {
-                setActiveTab("timer")
-                setIsTimerRunning(true)
-              }}
-            >
-              <Play className="w-5 h-5 mr-2" />
-              Start Focus Session
-            </Button>
-          </div>
-        </CardContent>
-      </Card>
-
-      {/* Gym Mode Quick Access */}
-      {settings?.gymMode && (
-        <Card className="glass-card">
-          <CardContent className="pt-6">
-            <div className="text-center space-y-4">
-              <Dumbbell className="w-10 h-10 text-primary mx-auto" />
-              <div>
-                <p className="font-medium text-foreground">Ready to train?</p>
-                <p className="text-sm text-muted-foreground">{gymTasks.length} exercises in your queue</p>
+                <Button
+                  size="sm"
+                  className="h-8 text-xs px-3"
+                  onClick={() => {
+                    setActiveTab("timer")
+                    setIsTimerRunning(true)
+                  }}
+                >
+                  <Play className="w-3 h-3 mr-1" />
+                  Start Focus
+                </Button>
               </div>
-              <Button size="lg" variant="outline" className="w-full h-12 glass-card bg-transparent" onClick={() => setActiveTab("gym")}>
-                <Dumbbell className="w-5 h-5 mr-2" />
-                Open Gym Mode
-              </Button>
             </div>
           </CardContent>
         </Card>
-      )}
-    </div>
-  )
+
+        {/* Today's Tasks */}
+        <Card className="glass-card">
+          <CardHeader className="flex flex-row items-center justify-between pb-3">
+            <CardTitle className="text-base">Today's Tasks</CardTitle>
+            <Button size="sm" className="h-8 text-xs" onClick={() => setNewTaskOpen(true)}>
+              <Plus className="w-3 h-3 mr-1" />
+              Add
+            </Button>
+          </CardHeader>
+          <CardContent className="space-y-2 pt-0">
+            {isLoading ? (
+              <div className="flex items-center justify-center py-6">
+                <Loader2 className="w-5 h-5 animate-spin text-primary" />
+              </div>
+            ) : regularTasks.length === 0 && gymTasks.length === 0 ? (
+              <div className="text-center py-6 space-y-3">
+                <ListTodo className="w-8 h-8 text-muted-foreground/40 mx-auto" />
+                <p className="text-sm text-muted-foreground">No tasks yet</p>
+                <Button size="sm" variant="outline" onClick={() => setNewTaskOpen(true)}>
+                  Create your first task
+                </Button>
+              </div>
+            ) : (
+              <>
+                {regularTasks.slice(0, 3).map((task) => (
+                  <button
+                    key={task.id}
+                    className="w-full flex items-center space-x-3 p-3 glass-card rounded-xl
+                      hover:bg-muted/20 active:scale-[0.98] transition-all text-left"
+                    onClick={() => selectTaskForFocus(task)}
+                  >
+                    <div
+                      className={`w-2.5 h-2.5 rounded-full shrink-0 ${
+                        task.completed ? "bg-accent" : task.color || "bg-primary"
+                      }`}
+                    />
+                    <div className="flex-1 min-w-0">
+                      <p
+                        className={`text-sm font-medium truncate ${
+                          task.completed
+                            ? "line-through text-muted-foreground"
+                            : "text-foreground"
+                        }`}
+                      >
+                        {task.title}
+                      </p>
+                      <p className="text-xs text-muted-foreground">{task.category}</p>
+                    </div>
+                    {task.completed ? (
+                      <CheckCircle2 className="w-4 h-4 text-accent shrink-0" />
+                    ) : (
+                      <ChevronRight className="w-4 h-4 text-muted-foreground/50 shrink-0" />
+                    )}
+                  </button>
+                ))}
+                {gymTasks.length > 0 && (
+                  <div className="border-t border-border pt-2 mt-1">
+                    <p className="text-[10px] font-semibold tracking-widest uppercase text-muted-foreground mb-1.5 flex items-center gap-1">
+                      <Dumbbell className="w-3 h-3" />
+                      Gym
+                    </p>
+                    {gymTasks.slice(0, 2).map((task) => (
+                      <div key={task.id} className="flex items-center space-x-3 p-2 rounded-lg">
+                        <Dumbbell className="w-4 h-4 text-primary shrink-0" />
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-medium text-foreground truncate">{task.title}</p>
+                          <p className="text-xs text-muted-foreground">
+                            {task.setsPlanned}×{task.repsPerSet}
+                            {task.weightKg ? ` @ ${task.weightKg}kg` : ""}
+                          </p>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </>
+            )}
+            {regularTasks.length > 3 && (
+              <Button
+                variant="ghost"
+                className="w-full text-xs text-muted-foreground h-8"
+                onClick={() => setActiveTab("tasks")}
+              >
+                View all {regularTasks.length} tasks
+              </Button>
+            )}
+          </CardContent>
+        </Card>
+
+        {/* Gym Mode quick access */}
+        {settings?.gymMode && (
+          <Card className="glass-card">
+            <CardContent className="py-4">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center space-x-3">
+                  <div className="w-10 h-10 rounded-xl bg-primary/15 flex items-center justify-center">
+                    <Dumbbell className="w-5 h-5 text-primary" />
+                  </div>
+                  <div>
+                    <p className="text-sm font-semibold text-foreground">Gym Mode</p>
+                    <p className="text-xs text-muted-foreground">
+                      {gymTasks.length} exercise{gymTasks.length !== 1 ? "s" : ""} queued
+                    </p>
+                  </div>
+                </div>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="h-8 text-xs glass-card bg-transparent"
+                  onClick={() => setActiveTab("gym")}
+                >
+                  Open
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        )}
+
+        {/* Stats strip */}
+        <div className="grid grid-cols-3 gap-3">
+          {[
+            { label: "Sessions", value: stats.totalSessions, color: "text-primary" },
+            { label: "Streak", value: `${stats.dayStreak}d`, color: "text-accent" },
+            { label: "Tasks done", value: stats.completedTasksCount, color: "text-foreground" },
+          ].map(({ label, value, color }) => (
+            <Card key={label} className="glass-card">
+              <CardContent className="p-3 text-center">
+                <div className={`text-xl font-bold ${color}`}>{value}</div>
+                <div className="text-[10px] text-muted-foreground mt-0.5">{label}</div>
+              </CardContent>
+            </Card>
+          ))}
+        </div>
+      </div>
+    )
+  }
 
   const renderTimerScreen = () => {
     const totalSecs = mode === "focus" ? getFocusTotalSeconds() : shortBreakMinutes * 60
     const ratio = Math.min(1, Math.max(0, timeLeft / Math.max(1, totalSecs)))
+    const circumference = 2 * Math.PI * 44
 
     return (
-      <div className="space-y-8 page-transition">
-        <div className="text-center space-y-2">
-          <h1 className="text-2xl font-bold text-foreground">{mode === "focus" ? "Focus" : "Break"} Session</h1>
-          <p className="text-muted-foreground">
-            {mode === "focus" ? currentTaskTitle : "Time to recharge"}
-          </p>
+      <div className="space-y-6 page-transition">
+        {/* Mode pill */}
+        <div className="flex justify-center">
+          <div className="flex rounded-full p-0.5 bg-muted/30 gap-0.5">
+            {(["focus", "break"] as const).map((m) => (
+              <button
+                key={m}
+                onClick={() => {
+                  if (isTimerRunning) return
+                  setMode(m)
+                  setTimeLeft(m === "focus" ? getFocusTotalSeconds() : shortBreakMinutes * 60)
+                }}
+                className={`px-4 py-1.5 rounded-full text-sm font-semibold transition-all duration-200 ${
+                  mode === m
+                    ? "bg-primary text-primary-foreground shadow-sm"
+                    : "text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                {m === "focus" ? "Focus" : "Break"}
+              </button>
+            ))}
+          </div>
         </div>
 
-        {/* Circular Timer */}
-        <div className="flex items-center justify-center">
-          <div className="relative w-64 h-64">
-            <svg className="w-64 h-64 transform -rotate-90 chart-animate" viewBox="0 0 100 100">
-              <circle
-                cx="50"
-                cy="50"
-                r="45"
-                stroke="currentColor"
-                strokeWidth="4"
-                fill="transparent"
-                className="text-muted"
+        {/* Task label */}
+        <p className="text-center text-sm text-muted-foreground font-medium truncate px-8">
+          {mode === "focus" ? currentTaskTitle : "Time to recharge ☕"}
+        </p>
+
+        {/* Circular timer — large, weighted, animated pulse ring */}
+        <div className="flex items-center justify-center py-2">
+          <div className="relative w-72 h-72">
+            {/* Outer pulse ring when running */}
+            {isTimerRunning && (
+              <div
+                className={`absolute inset-0 rounded-full border-2 animate-ping
+                  ${mode === "focus" ? "border-primary/20" : "border-accent/20"}`}
+                style={{ animationDuration: "2s" }}
               />
+            )}
+
+            <svg className="w-72 h-72 -rotate-90" viewBox="0 0 100 100">
+              {/* Subtle background fill */}
               <circle
-                cx="50"
-                cy="50"
-                r="45"
+                cx="50" cy="50" r="44"
+                fill={mode === "focus" ? "rgba(239,68,68,0.04)" : "rgba(34,197,94,0.04)"}
+              />
+              {/* Track */}
+              <circle
+                cx="50" cy="50" r="44"
                 stroke="currentColor"
-                strokeWidth="4"
+                strokeWidth="5"
                 fill="transparent"
-                strokeDasharray={`${2 * Math.PI * 45}`}
-                strokeDashoffset={`${2 * Math.PI * 45 * ratio}`}
-                className={`text-primary chart-animate ${isTimerRunning ? "timer-pulse" : ""}`}
+                className="text-muted/25"
+              />
+              {/* Progress */}
+              <circle
+                cx="50" cy="50" r="44"
+                stroke="currentColor"
+                strokeWidth="5"
+                fill="transparent"
+                strokeDasharray={circumference}
+                strokeDashoffset={circumference * ratio}
+                className={`chart-animate ${mode === "focus" ? "text-primary" : "text-accent"}`}
                 strokeLinecap="round"
               />
             </svg>
-            <div className="absolute inset-0 flex flex-col items-center justify-center">
-              <span className="text-4xl font-bold text-foreground">{formatTime(timeLeft)}</span>
-              <span className="text-muted-foreground text-sm">
-                {mode === "focus" ? `${selectedTaskDuration} min focus` : `break`}
+
+            {/* Timer face */}
+            <div className="absolute inset-0 flex flex-col items-center justify-center gap-1">
+              <span className="text-[3.5rem] font-bold text-foreground leading-none tabular-nums tracking-tight">
+                {formatTime(timeLeft)}
+              </span>
+              <span className={`text-xs font-semibold tracking-widest uppercase ${
+                mode === "focus" ? "text-primary/70" : "text-accent/70"
+              }`}>
+                {mode === "focus" ? `${selectedTaskDuration} min focus` : "break"}
               </span>
             </div>
           </div>
         </div>
 
-        {/* Timer Controls */}
-        <div className="flex justify-center space-x-4">
-          <Button size="lg" onClick={() => setIsTimerRunning(!isTimerRunning)} className="w-28 h-12 text-base">
-            {isTimerRunning ? <Pause className="w-5 h-5 mr-2" /> : <Play className="w-5 h-5 mr-2" />}
-            {isTimerRunning ? "Pause" : "Start"}
-          </Button>
+        {/* Controls */}
+        <div className="flex justify-center items-center gap-4">
+          {/* Reset */}
           <Button
             variant="outline"
-            size="lg"
-            className="w-28 h-12 glass-card bg-transparent text-base"
+            size="icon"
+            className="w-12 h-12 rounded-full glass-card bg-transparent"
             onClick={() => {
               setIsTimerRunning(false)
               setTimeLeft(mode === "focus" ? getFocusTotalSeconds() : shortBreakMinutes * 60)
             }}
           >
-            Reset
+            <RefreshCw className="w-4 h-4" />
+          </Button>
+
+          {/* Play / Pause — primary CTA */}
+          <Button
+            size="lg"
+            className={`w-20 h-20 rounded-full text-base font-bold shadow-lg transition-all
+              active:scale-95 ${isTimerRunning ? "bg-muted text-foreground hover:bg-muted/80" : ""}`}
+            onClick={() => setIsTimerRunning(!isTimerRunning)}
+          >
+            {isTimerRunning ? (
+              <Pause className="w-7 h-7" />
+            ) : (
+              <Play className="w-7 h-7 translate-x-0.5" />
+            )}
+          </Button>
+
+          {/* Skip — ghost */}
+          <Button
+            variant="outline"
+            size="icon"
+            className="w-12 h-12 rounded-full glass-card bg-transparent opacity-60 hover:opacity-100"
+            onClick={handleSessionComplete}
+            title="Skip to next"
+          >
+            <Clock className="w-4 h-4" />
           </Button>
         </div>
 
-        {/* Session Info */}
+        {/* Stats strip */}
         <Card className="glass-card">
-          <CardContent className="pt-6">
+          <CardContent className="py-4">
             <div className="grid grid-cols-3 gap-4 text-center">
               <div>
-                <div className="text-2xl font-bold text-foreground">{stats.todaysSessionsCount}</div>
-                <div className="text-xs text-muted-foreground">Today's Done</div>
+                <div className="text-2xl font-bold text-foreground tabular-nums">
+                  {stats.todaysSessionsCount}
+                </div>
+                <div className="text-[10px] text-muted-foreground uppercase tracking-wide mt-0.5">
+                  Today
+                </div>
               </div>
               <div>
-                <div className="text-2xl font-bold text-primary">{stats.dayStreak}d</div>
-                <div className="text-xs text-muted-foreground">Day Streak</div>
+                <div className="text-2xl font-bold text-primary tabular-nums">
+                  {stats.dayStreak}
+                  <span className="text-sm">d</span>
+                </div>
+                <div className="text-[10px] text-muted-foreground uppercase tracking-wide mt-0.5">
+                  Streak
+                </div>
               </div>
               <div>
-                <div className="text-2xl font-bold text-muted-foreground">{stats.dailyGoalCount}</div>
-                <div className="text-xs text-muted-foreground">Daily Goal</div>
+                <div className="text-2xl font-bold text-muted-foreground tabular-nums">
+                  {stats.dailyGoalCount}
+                </div>
+                <div className="text-[10px] text-muted-foreground uppercase tracking-wide mt-0.5">
+                  Goal
+                </div>
               </div>
             </div>
           </CardContent>
@@ -723,29 +902,46 @@ export function Dashboard() {
       </div>
 
       {/* Bottom Navigation */}
-      <div className="fixed bottom-0 left-0 right-0 glass-bottom-nav border-t border-border z-10">
-        <div className="flex items-center justify-around p-2 max-w-md mx-auto">
-          {baseTabs.map(({ key, icon: Icon, label }) => (
-            <Button
-              key={key}
-              variant={activeTab === key ? "default" : "ghost"}
-              size="sm"
-              onClick={() => setActiveTab(key)}
-              className="flex flex-col items-center justify-center w-12 h-12 rounded-full transition-all"
-            >
-              <Icon className="w-5 h-5" />
-            </Button>
-          ))}
-          <Button
-            variant={activeTab === "settings" ? "default" : "ghost"}
-            size="sm"
-            onClick={() => setActiveTab("settings")}
-            className="flex items-center justify-center w-12 h-12 rounded-full transition-all"
-          >
-            <Settings className="w-5 h-5" />
-          </Button>
+      <nav
+        className="fixed bottom-0 left-0 right-0 glass-bottom-nav border-t border-border z-10 pb-[env(safe-area-inset-bottom)]"
+        aria-label="Primary"
+      >
+        <div className="flex items-stretch justify-around px-2 py-2 max-w-md mx-auto">
+          {[...baseTabs, { key: "settings" as TabType, icon: Settings, label: "Settings" }].map(
+            ({ key, icon: Icon, label }) => {
+              const isActive = activeTab === key
+              return (
+                <button
+                  key={key}
+                  type="button"
+                  onClick={() => setActiveTab(key)}
+                  aria-current={isActive ? "page" : undefined}
+                  className={`relative flex flex-1 flex-col items-center gap-1 rounded-xl px-1 pt-2 pb-1 transition-colors duration-200
+                    ${
+                      isActive
+                        ? "text-primary"
+                        : "text-muted-foreground hover:text-foreground"
+                    }`}
+                >
+                  {isActive && (
+                    <span
+                      className="absolute -top-2 left-1/2 h-0.5 w-7 -translate-x-1/2 rounded-full bg-primary"
+                      aria-hidden="true"
+                    />
+                  )}
+                  <span
+                    className={`flex h-9 w-9 items-center justify-center rounded-full transition-all duration-200
+                      ${isActive ? "bg-primary/15 scale-105" : "scale-100"}`}
+                  >
+                    <Icon className="w-5 h-5" />
+                  </span>
+                  <span className="text-[10px] font-medium leading-none">{label}</span>
+                </button>
+              )
+            },
+          )}
         </div>
-      </div>
+      </nav>
 
       {/* Create Task Dialog */}
       <Dialog open={newTaskOpen} onOpenChange={(open) => { setNewTaskOpen(open); if (!open) resetNewTaskForm() }}>

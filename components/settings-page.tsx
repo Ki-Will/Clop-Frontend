@@ -44,6 +44,7 @@ export function SettingsPage({ onBack }: SettingsPageProps) {
     restTimerSeconds: 60,
     autoRestTimer: true,
     weightUnit: "kg",
+    dailyGoalCount: 4,
   })
 
   const [stats, setStats] = useState<UserStats>({
@@ -80,17 +81,17 @@ export function SettingsPage({ onBack }: SettingsPageProps) {
         setSettings(data)
         setNewRestTime(data.restTimerSeconds)
       })
-      .catch(() => {})
+      .catch((err) => console.warn("Failed to load settings:", err))
 
     apiClient.sessions
       .getStats()
       .then((data) => setStats(data))
-      .catch(() => {})
+      .catch((err) => console.warn("Failed to load stats:", err))
 
     apiClient.gym
       .getExercises()
       .then((data) => setGymExercises(data))
-      .catch(() => {})
+      .catch((err) => console.warn("Failed to load gym exercises:", err))
   }, [])
 
   const handleSettingToggle = async (
@@ -125,6 +126,22 @@ export function SettingsPage({ onBack }: SettingsPageProps) {
       toast.success("Weight unit updated")
     } catch {
       toast.error("Failed to update weight unit")
+    }
+  }
+
+  const handleDailyGoalChange = async (value: number) => {
+    const clamped = Math.max(1, Math.min(12, Math.round(value)))
+    setStats((prev) => ({ ...prev, dailyGoalCount: clamped }))
+    setSettings((prev) => ({ ...prev, dailyGoalCount: clamped }))
+    // Mirror to localStorage so the dashboard's onboarding override stays in sync
+    if (typeof window !== "undefined") {
+      localStorage.setItem("clop_daily_target", String(clamped))
+    }
+    try {
+      await apiClient.settings.updateSettings({ dailyGoalCount: clamped })
+      toast.success("Daily goal updated")
+    } catch {
+      toast.error("Failed to update daily goal")
     }
   }
 
@@ -297,6 +314,58 @@ export function SettingsPage({ onBack }: SettingsPageProps) {
               checked={settings.soundEnabled}
               onCheckedChange={(val) => handleSettingToggle("soundEnabled", val)}
             />
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Focus Goals */}
+      <Card className="glass-card">
+        <CardHeader>
+          <CardTitle className="flex items-center space-x-2">
+            <Clock className="w-5 h-5 text-primary" />
+            <span>Focus Goals</span>
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="font-medium text-foreground">Daily Pomodoro Target</p>
+              <p className="text-sm text-muted-foreground">Sessions to complete each day</p>
+            </div>
+            <div className="flex items-center gap-2">
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => handleDailyGoalChange(stats.dailyGoalCount - 1)}
+                disabled={stats.dailyGoalCount <= 1}
+              >
+                −
+              </Button>
+              <span className="w-8 text-center text-lg font-bold text-primary tabular-nums">
+                {stats.dailyGoalCount}
+              </span>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => handleDailyGoalChange(stats.dailyGoalCount + 1)}
+                disabled={stats.dailyGoalCount >= 12}
+              >
+                +
+              </Button>
+            </div>
+          </div>
+          <div className="flex gap-2">
+            {[3, 4, 6, 8].map((n) => (
+              <Button
+                key={n}
+                size="sm"
+                variant={stats.dailyGoalCount === n ? "default" : "outline"}
+                onClick={() => handleDailyGoalChange(n)}
+                className="flex-1 text-xs"
+              >
+                {n}
+              </Button>
+            ))}
           </div>
         </CardContent>
       </Card>

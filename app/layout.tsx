@@ -8,8 +8,8 @@ import { ThemeProvider } from "@/components/theme-provider"
 import "./globals.css"
 
 export const metadata: Metadata = {
-  title: "FocusFlow - Pomodoro Productivity App",
-  description: "Modern mobile productivity app with Pomodoro technique",
+  title: "Clop - Focus, Lift, Win",
+  description: "Pomodoro focus timer, tasks, and gym tracking in one productivity app",
   generator: "v0.app",
 }
 

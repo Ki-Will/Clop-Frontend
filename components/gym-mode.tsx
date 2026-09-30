@@ -343,7 +343,10 @@ export function GymMode({ settings }: GymModeProps) {
       const [s, r] = await Promise.all([apiClient.gym.getStats(), apiClient.gym.getRecentSessions()])
       setStats(s)
       setRecentSessions(r)
-    } catch {}
+    } catch (err) {
+      // Stats are non-critical — keep defaults but leave a trace for debugging
+      console.warn("Failed to load gym stats:", err)
+    }
   }, [])
 
   useEffect(() => {
@@ -547,6 +550,7 @@ export function GymMode({ settings }: GymModeProps) {
       
       toast.success(`Starting ${template.name} workout!`)
     } catch (error) {
+      console.error("Failed to start workout from template:", error)
       toast.error("Failed to start workout from template")
     }
   }
@@ -578,8 +582,9 @@ export function GymMode({ settings }: GymModeProps) {
       ])
       setProgressionStats(stats)
       setPersonalRecords(records)
-    } catch {
-      // Silent fail for progression stats
+    } catch (err) {
+      // Non-critical for the workout flow — defaults are fine, but log it
+      console.warn("Failed to load progression stats:", err)
     }
   }, [])
 

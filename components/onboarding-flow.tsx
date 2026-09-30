@@ -1,6 +1,7 @@
 "use client"
 
 import { useState } from "react"
+import { apiClient } from "@/lib/api-client"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Card, CardContent } from "@/components/ui/card"
@@ -16,6 +17,7 @@ import {
   Clock,
   Flame,
   Check,
+  Bell,
 } from "lucide-react"
 
 interface OnboardingFlowProps {
@@ -121,6 +123,9 @@ export function OnboardingFlow({ onComplete }: OnboardingFlowProps) {
         localStorage.setItem("clop_workout_duration", String(data.preferredWorkoutDuration))
         localStorage.setItem("clop_notification_pref", data.notificationPreference)
         localStorage.setItem("clop_quick_exercises", JSON.stringify(data.quickExercises))
+        // Onboarding happens before the account exists — flag these answers
+        // so auth-context syncs them to the backend once the user is signed in
+        localStorage.setItem("clop_pending_sync", "true")
       }
       onComplete()
     }

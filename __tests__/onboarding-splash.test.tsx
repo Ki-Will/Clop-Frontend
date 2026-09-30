@@ -5,10 +5,10 @@ import { SplashScreen } from '../components/splash-screen'
 import { OnboardingFlow } from '../components/onboarding-flow'
 
 describe('SplashScreen and OnboardingFlow Tests', () => {
-  it('renders SplashScreen with FocusFlow branding', () => {
+  it('renders SplashScreen with Clop branding', () => {
     render(<SplashScreen />)
-    expect(screen.getByText('FocusFlow')).toBeDefined()
-    expect(screen.getByText('Productivity Made Simple')).toBeDefined()
+    expect(screen.getByText('Clop')).toBeDefined()
+    expect(screen.getByText('Focus · Lift · Win')).toBeDefined()
   })
 
   it('renders OnboardingFlow and allows navigation', async () => {

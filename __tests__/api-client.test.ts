@@ -1,32 +1,50 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 import { apiClient } from '../lib/api-client'
 
+// These tests run against the live backend at http://localhost:4000.
+// They seed their own account (register, or log in if it already exists)
+// so every test has a valid token in localStorage and the suite is
+// idempotent against the shared dev database.
+const PASSWORD = 'password123'
+const SUITE_EMAIL = 'api-tester@example.com'
+
+async function authenticate(email: string) {
+  try {
+    await apiClient.auth.register({ email, password: PASSWORD, username: 'API Tester' })
+  } catch {
+    // Account already exists from a previous run — log in instead
+    await apiClient.auth.login({ email, password: PASSWORD })
+  }
+}
+
 describe('apiClient Unit Tests', () => {
-  beforeEach(() => {
+  beforeEach(async () => {
     localStorage.clear()
+    // Protected endpoints need a token; authenticate before each test
+    await authenticate(SUITE_EMAIL)
   })
 
   it('registers user and stores token locally', async () => {
+    // Unique email so register is genuinely exercised on every run
+    const email = `api-registered-${Date.now()}@example.com`
     const res = await apiClient.auth.register({
-      email: 'test@example.com',
-      password: 'password123',
+      email,
+      password: PASSWORD,
       username: 'TestUser',
     })
 
-    expect(res.user.email).toBe('test@example.com')
+    expect(res.user.email).toBe(email)
     expect(res.user.username).toBe('TestUser')
     expect(res.token).toBeDefined()
     expect(localStorage.getItem('clop_token')).toBe(res.token)
   })
 
   it('logins existing or mock user successfully', async () => {
-    const res = await apiClient.auth.login({
-      email: 'login@example.com',
-      password: 'password123',
-    })
+    const res = await apiClient.auth.login({ email: SUITE_EMAIL, password: PASSWORD })
 
-    expect(res.user.email).toBe('login@example.com')
+    expect(res.user.email).toBe(SUITE_EMAIL)
     expect(res.token).toBeDefined()
+    expect(localStorage.getItem('clop_token')).toBe(res.token)
   })
 
   it('manages task lifecycle (get, create, update, delete)', async () => {

@@ -6,7 +6,22 @@ export interface User {
   username: string
   phone?: string
   address?: string
+  // Onboarding profile fields
+  experienceLevel?: string
+  workoutFrequency?: number
+  preferredWorkoutDuration?: number
+  notificationPreference?: string
   createdAt: string
+}
+
+export interface UpdateProfilePayload {
+  username?: string
+  phone?: string
+  address?: string
+  experienceLevel?: string
+  workoutFrequency?: number
+  preferredWorkoutDuration?: number
+  notificationPreference?: string
 }
 
 export interface TaskItem {
@@ -49,6 +64,7 @@ export interface UserSettingsData {
   restTimerSeconds: number
   autoRestTimer: boolean
   weightUnit: string
+  dailyGoalCount: number
 }
 
 export interface GymExercise {
@@ -195,13 +211,89 @@ export interface PersonalRecord {
   totalSessions: number
 }
 
-class ApiError extends Error {
+// Fallback user-facing messages by HTTP status (backend messages take precedence)
+const USER_ERROR_MESSAGES: Record<number, string> = {
+  400: "Please check your input and try again.",
+  401: "Please sign in to continue.",
+  403: "You don't have permission to do that.",
+  404: "The requested item could not be found.",
+  409: "That conflicts with data that already exists.",
+  422: "Please check your input and try again.",
+  429: "Too many requests. Please wait a moment and try again.",
+  500: "Something went wrong on our end. Please try again later.",
+  502: "Something went wrong on our end. Please try again later.",
+  503: "Something went wrong on our end. Please try again later.",
+  504: "The server took too long to respond. Please try again.",
+}
+
+export function getUserMessage(status: number): string {
+  return USER_ERROR_MESSAGES[status] ?? "An unexpected error occurred"
+}
+
+function codeForStatus(status: number): string {
+  switch (status) {
+    case 0:
+      return "NETWORK_ERROR"
+    case 400:
+      return "VALIDATION_ERROR"
+    case 401:
+      return "UNAUTHORIZED"
+    case 403:
+      return "FORBIDDEN"
+    case 404:
+      return "NOT_FOUND"
+    case 409:
+      return "CONFLICT"
+    case 422:
+      return "VALIDATION_ERROR"
+    case 429:
+      return "RATE_LIMITED"
+    default:
+      return status >= 500 ? "INTERNAL_ERROR" : "UNKNOWN_ERROR"
+  }
+}
+
+export class ApiError extends Error {
   status: number
-  constructor(message: string, status: number) {
+  /** Machine-readable code, e.g. UNAUTHORIZED, NETWORK_ERROR */
+  code: string
+
+  constructor(message: string, status: number, code?: string) {
     super(message)
     this.status = status
+    this.code = code ?? codeForStatus(status)
     this.name = "ApiError"
+    // Keep the prototype chain intact so `err instanceof ApiError` works
+    Object.setPrototypeOf(this, new.target.prototype)
   }
+}
+
+interface RetryOptions {
+  maxAttempts?: number
+  baseDelayMs?: number
+  maxDelayMs?: number
+  retryIf?: (error: unknown) => boolean
+}
+
+// Retry transient failures with exponential backoff + jitter.
+// Callers must decide what is retriable via retryIf (e.g. network errors only).
+async function withRetry<T>(fn: () => Promise<T>, options: RetryOptions = {}): Promise<T> {
+  const { maxAttempts = 3, baseDelayMs = 300, maxDelayMs = 2000, retryIf = () => true } = options
+
+  let lastError: unknown
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      return await fn()
+    } catch (error) {
+      lastError = error
+      if (attempt === maxAttempts || !retryIf(error)) throw error
+
+      const jitter = Math.random() * baseDelayMs
+      const delay = Math.min(baseDelayMs * 2 ** (attempt - 1) + jitter, maxDelayMs)
+      await new Promise((resolve) => setTimeout(resolve, delay))
+    }
+  }
+  throw lastError
 }
 
 async function request<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
@@ -216,17 +308,40 @@ async function request<T>(endpoint: string, options: RequestInit = {}): Promise<
     headers["Authorization"] = `Bearer ${token}`
   }
 
-  const response = await fetch(`${API_BASE_URL}${endpoint}`, {
-    ...options,
-    headers,
-  })
+  const method = (options.method || "GET").toUpperCase()
+  const isIdempotent = method === "GET" || method === "HEAD"
+
+  const execute = async (): Promise<Response> => {
+    try {
+      return await fetch(`${API_BASE_URL}${endpoint}`, {
+        ...options,
+        headers,
+      })
+    } catch (networkError) {
+      // fetch() only rejects on network-level failures (offline, DNS, refused)
+      console.error(`Network error on ${method} ${endpoint}:`, networkError)
+      throw new ApiError(
+        "Cannot reach the server. Check your connection and try again.",
+        0,
+        "NETWORK_ERROR",
+      )
+    }
+  }
+
+  // Retry idempotent reads on network failures only — never mutations, never HTTP errors
+  const response = isIdempotent
+    ? await withRetry(execute, {
+        maxAttempts: 2,
+        retryIf: (error) => error instanceof ApiError && error.code === "NETWORK_ERROR",
+      })
+    : await execute()
 
   const data = await response.json().catch(() => ({}))
 
   if (!response.ok) {
     const message = Array.isArray(data.message)
       ? data.message.join(", ")
-      : data.message || "An unexpected error occurred"
+      : data.message || getUserMessage(response.status)
     throw new ApiError(message, response.status)
   }
 
@@ -235,17 +350,27 @@ async function request<T>(endpoint: string, options: RequestInit = {}): Promise<
 
 export const apiClient = {
   auth: {
-    register: (payload: { email: string; password: string; username?: string; phone?: string; address?: string }) =>
-      request<{ user: User; token: string }>("/auth/register", {
+    register: async (payload: { email: string; password: string; username?: string; phone?: string; address?: string }) => {
+      const res = await request<{ user: User; token: string }>("/auth/register", {
         method: "POST",
         body: JSON.stringify(payload),
-      }),
+      })
+      if (typeof window !== "undefined") {
+        localStorage.setItem("clop_token", res.token)
+      }
+      return res
+    },
 
-    login: (payload: { email: string; password: string }) =>
-      request<{ user: User; token: string }>("/auth/login", {
+    login: async (payload: { email: string; password: string }) => {
+      const res = await request<{ user: User; token: string }>("/auth/login", {
         method: "POST",
         body: JSON.stringify(payload),
-      }),
+      })
+      if (typeof window !== "undefined") {
+        localStorage.setItem("clop_token", res.token)
+      }
+      return res
+    },
 
     getMe: () => request<User>("/auth/me"),
   },
@@ -253,7 +378,7 @@ export const apiClient = {
   users: {
     getProfile: () => request<User>("/users/me"),
 
-    updateProfile: (payload: { username?: string; phone?: string; address?: string }) =>
+    updateProfile: (payload: UpdateProfilePayload) =>
       request<User>("/users/me", {
         method: "PATCH",
         body: JSON.stringify(payload),
@@ -327,6 +452,7 @@ export const apiClient = {
       restTimerSeconds?: number
       autoRestTimer?: boolean
       weightUnit?: string
+      dailyGoalCount?: number
     }) =>
       request<UserSettingsData>("/settings", {
         method: "PATCH",
